@@ -74,6 +74,9 @@ func (h *StockProxyHandler) CheckStock(c *gin.Context) {
 		httpReq.Header.Set("X-Request-ID", rid)
 	}
 
+	// Forward from-gateway untuk perbedaan asal request
+	httpReq.Header.Set("X-From-Gateway", "finpharm-gateway")
+
 	// 4) Call upstream
 	resp, err := h.client.Do(httpReq)
 	if err != nil {
