@@ -36,16 +36,10 @@ type CheckStockResponse struct {
 func (h *StockHandler) CheckStock(c *gin.Context) {
 	var req CheckStockRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		// Error handling versi Day 2 (nanti kita rapikan & standarkan Day 3)
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "VALIDATION_ERROR",
-				"message": "invalid request body",
-				"details": err.Error(),
-			},
-		})
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", err.Error())
 		return
 	}
+	
 
 	available := h.stock[req.MedicineID] // kalau tidak ada, default 0
 	resp := CheckStockResponse{

@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"os"
 	"time"
+
+	"finpharm-ai/services/gateway/internal/httpapi/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -26,9 +27,7 @@ func NewStockProxyHandler() *StockProxyHandler {
 
 	return &StockProxyHandler{
 		baseURL: baseURL,
-		client: &http.Client{
-			Timeout: 3 * time.Second,
-		},
+		client: &http.Client{Timeout: 3 * time.Second},
 	}
 }
 
@@ -38,63 +37,56 @@ type CheckStockRequest struct {
 }
 
 func (h *StockProxyHandler) CheckStock(c *gin.Context) {
-	// 1) Validasi input di gateway juga (best practice: fail fast)
 	var req CheckStockRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": gin.H{
-				"code":    "VALIDATION_ERROR",
-				"message": "invalid request body",
-				"details": err.Error(),
-			},
-		})
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", err.Error())
 		return
 	}
 
-	// 2) Serialize request untuk dikirim ke transaction service
-	bodyBytes, _ := json.Marshal(req)
+	bodyBytes, err := json.Marshal(req)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, "GATEWAY_ERROR", "failed to encode request", nil)
+		return
+	}
 
-	// 3) Buat request ke transaction service
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
 
 	url := h.baseURL + "/v1/stock/check"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{"code": "GATEWAY_ERROR", "message": "failed to create upstream request"},
-		})
+		RespondError(c, http.StatusInternalServerError, "GATEWAY_ERROR", "failed to create upstream request", nil)
 		return
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
+	upReq.Header.Set("Content-Type", "application/json")
 
-	// Forward request-id untuk tracing (kalau ada)
-	if rid := c.GetHeader("X-Request-ID"); rid != "" {
-		httpReq.Header.Set("X-Request-ID", rid)
-	}
+	// ✅ propagate request-id (sekarang selalu ada dari middleware)
+	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
+	rid, _ := ridVal.(string)
+	upReq.Header.Set(middleware.HeaderRequestID, rid)
 
-	// Forward from-gateway untuk perbedaan asal request
-	httpReq.Header.Set("X-From-Gateway", "finpharm-gateway")
+	// ✅ PR kamu: tandai asal request dari gateway
+	upReq.Header.Set("X-From-Gateway", "finpharm-gateway")
 
-	// 4) Call upstream
-	resp, err := h.client.Do(httpReq)
+	resp, err := h.client.Do(upReq)
 	if err != nil {
-		// Bedakan timeout vs error lain
-		if errors.Is(err, context.DeadlineExceeded) {
-			c.JSON(http.StatusGatewayTimeout, gin.H{
-				"error": gin.H{"code": "UPSTREAM_TIMEOUT", "message": "transaction service timeout"},
-			})
-			return
-		}
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error": gin.H{"code": "UPSTREAM_ERROR", "message": "transaction service unreachable", "details": err.Error()},
-		})
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "transactions service unreachable", err.Error())
 		return
 	}
 	defer resp.Body.Close()
 
-	// 5) Relay response apa adanya (simple gateway pattern)
-	respBody, _ := io.ReadAll(resp.Body)
-	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), respBody)
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "failed to read upstream response", nil)
+		return
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+
+	// pass-through response upstream (kalau error format upstream sudah standar, client dapat format itu)
+	c.Data(resp.StatusCode, ct, respBody)
 }

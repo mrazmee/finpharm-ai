@@ -2,13 +2,14 @@ package httpapi
 
 import (
 	"finpharm-ai/services/transaction/internal/httpapi/handler"
+	"finpharm-ai/services/transaction/internal/httpapi/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
 func NewRouter() *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
 
 	h := handler.NewHealthHandler()
 	stock := handler.NewStockHandler()
