@@ -1,13 +1,16 @@
 package httpapi
 
 import (
+	"finpharm-ai/services/transaction/internal/config"
 	"finpharm-ai/services/transaction/internal/httpapi/handler"
 	"finpharm-ai/services/transaction/internal/httpapi/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
-func NewRouter() *gin.Engine {
+func NewRouter(cfg config.Config) *gin.Engine {
+	_ = cfg // belum dipakai di router, tapi sengaja disiapkan untuk Day berikutnya
+
 	r := gin.New()
 	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
 

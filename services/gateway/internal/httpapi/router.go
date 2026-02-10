@@ -1,20 +1,19 @@
 package httpapi
 
 import (
+	"finpharm-ai/services/gateway/internal/config"
 	"finpharm-ai/services/gateway/internal/httpapi/handler"
 	"finpharm-ai/services/gateway/internal/httpapi/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
-func NewRouter() *gin.Engine {
+func NewRouter(cfg config.Config) *gin.Engine {
 	r := gin.New()
-
-	// Urutan penting: RequestID -> Logger -> Recovery
 	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
 
 	h := handler.NewHealthHandler()
-	proxy := handler.NewStockProxyHandler()
+	proxy := handler.NewStockProxyHandler(cfg.TransactionBaseURL)
 
 	r.GET("/", h.Hello)
 	r.GET("/health", h.Health)

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
 	"finpharm-ai/services/gateway/internal/httpapi/middleware"
@@ -19,15 +18,10 @@ type StockProxyHandler struct {
 	client  *http.Client
 }
 
-func NewStockProxyHandler() *StockProxyHandler {
-	baseURL := os.Getenv("TRANSACTION_BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8081"
-	}
-
+func NewStockProxyHandler(transactionBaseURL string) *StockProxyHandler {
 	return &StockProxyHandler{
-		baseURL: baseURL,
-		client: &http.Client{Timeout: 3 * time.Second},
+		baseURL: transactionBaseURL,
+		client:  &http.Client{Timeout: 3 * time.Second},
 	}
 }
 
@@ -61,17 +55,15 @@ func (h *StockProxyHandler) CheckStock(c *gin.Context) {
 
 	upReq.Header.Set("Content-Type", "application/json")
 
-	// ✅ propagate request-id (sekarang selalu ada dari middleware)
 	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
 	rid, _ := ridVal.(string)
 	upReq.Header.Set(middleware.HeaderRequestID, rid)
 
-	// ✅ PR kamu: tandai asal request dari gateway
 	upReq.Header.Set("X-From-Gateway", "finpharm-gateway")
 
 	resp, err := h.client.Do(upReq)
 	if err != nil {
-		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "transactions service unreachable", err.Error())
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "transaction service unreachable", err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -87,6 +79,5 @@ func (h *StockProxyHandler) CheckStock(c *gin.Context) {
 		ct = "application/json"
 	}
 
-	// pass-through response upstream (kalau error format upstream sudah standar, client dapat format itu)
 	c.Data(resp.StatusCode, ct, respBody)
 }
