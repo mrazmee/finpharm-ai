@@ -7,7 +7,9 @@ import (
 )
 
 type Config struct {
-	Port               string
+	AppEnv string
+	Port   string
+
 	TransactionBaseURL string
 
 	ReadTimeout     time.Duration
@@ -17,6 +19,7 @@ type Config struct {
 }
 
 func Load() Config {
+	appEnv := getEnv("APP_ENV", "local")
 	port := getEnv("PORT", "8080")
 	txURL := getEnv("TRANSACTION_BASE_URL", "http://localhost:8081")
 
@@ -26,6 +29,7 @@ func Load() Config {
 	shutdownMs := getEnvInt("SHUTDOWN_TIMEOUT_MS", 7000)
 
 	return Config{
+		AppEnv:             appEnv,
 		Port:               port,
 		TransactionBaseURL: txURL,
 		ReadTimeout:        time.Duration(readMs) * time.Millisecond,
@@ -33,6 +37,10 @@ func Load() Config {
 		IdleTimeout:        time.Duration(idleMs) * time.Millisecond,
 		ShutdownTimeout:    time.Duration(shutdownMs) * time.Millisecond,
 	}
+}
+
+func (c Config) IsDebugEnabled() bool {
+	return c.AppEnv == "local" || c.AppEnv == "dev"
 }
 
 func getEnv(key, def string) string {

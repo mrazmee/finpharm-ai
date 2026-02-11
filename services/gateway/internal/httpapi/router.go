@@ -14,7 +14,6 @@ func NewRouter(cfg config.Config) *gin.Engine {
 
 	h := handler.NewHealthHandler()
 	proxy := handler.NewStockProxyHandler(cfg.TransactionBaseURL)
-	debugProxy := handler.NewDebugProxyHandler(cfg.TransactionBaseURL)
 
 	r.GET("/", h.Hello)
 	r.GET("/health", h.Health)
@@ -22,7 +21,11 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	v1 := r.Group("/v1")
 	{
 		v1.POST("/stock/check", proxy.CheckStock)
-		v1.GET("/debug/sleep", debugProxy.Sleep)
+
+		if cfg.IsDebugEnabled() {
+			debugProxy := handler.NewDebugProxyHandler(cfg.TransactionBaseURL)
+			v1.GET("/debug/sleep", debugProxy.Sleep)
+		}
 	}
 
 	return r

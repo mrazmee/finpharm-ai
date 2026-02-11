@@ -9,14 +9,11 @@ import (
 )
 
 func NewRouter(cfg config.Config) *gin.Engine {
-	_ = cfg
-
 	r := gin.New()
 	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
 
 	h := handler.NewHealthHandler()
 	stock := handler.NewStockHandler()
-	debug := handler.NewDebugHandler()
 
 	r.GET("/", h.Hello)
 	r.GET("/health", h.Health)
@@ -24,7 +21,11 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	v1 := r.Group("/v1")
 	{
 		v1.POST("/stock/check", stock.CheckStock)
-		v1.GET("/debug/sleep", debug.Sleep)
+
+		if cfg.IsDebugEnabled() {
+			debug := handler.NewDebugHandler()
+			v1.GET("/debug/sleep", debug.Sleep)
+		}
 	}
 
 	return r
