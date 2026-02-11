@@ -16,10 +16,15 @@ func RequestLogger() gin.HandlerFunc {
 		ridVal, _ := c.Get(CtxKeyRequestID)
 		rid, _ := ridVal.(string)
 
+		path := c.FullPath()
+		if path == "" {
+			path = c.Request.URL.Path
+		}
+
 		slog.Info("http_request",
 			"request_id", rid,
 			"method", c.Request.Method,
-			"path", c.FullPath(),
+			"path", path,
 			"status", c.Writer.Status(),
 			"duration_ms", time.Since(start).Milliseconds(),
 			"client_ip", c.ClientIP(),
