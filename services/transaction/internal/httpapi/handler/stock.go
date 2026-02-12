@@ -3,22 +3,17 @@ package handler
 import (
 	"net/http"
 
+	"finpharm-ai/services/transaction/internal/domain"
+
 	"github.com/gin-gonic/gin"
 )
 
 type StockHandler struct {
-	// Day 2 masih in-memory. Nanti diganti repository/DB.
-	stock map[string]int
+	uc domain.StockUsecase
 }
 
-func NewStockHandler() *StockHandler {
-	return &StockHandler{
-		stock: map[string]int{
-			"AMOX500": 120,
-			"PARA500": 80,
-			"OBATKERAS-X": 5,
-		},
-	}
+func NewStockHandler(uc domain.StockUsecase) *StockHandler {
+	return &StockHandler{uc: uc}
 }
 
 type CheckStockRequest struct {
@@ -27,10 +22,10 @@ type CheckStockRequest struct {
 }
 
 type CheckStockResponse struct {
-	MedicineID    string `json:"medicine_id"`
-	RequestedQty  int    `json:"requested_qty"`
-	AvailableQty  int    `json:"available_qty"`
-	IsAvailable   bool   `json:"is_available"`
+	MedicineID   string `json:"medicine_id"`
+	RequestedQty int    `json:"requested_qty"`
+	AvailableQty int    `json:"available_qty"`
+	IsAvailable  bool   `json:"is_available"`
 }
 
 func (h *StockHandler) CheckStock(c *gin.Context) {
@@ -39,15 +34,20 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", err.Error())
 		return
 	}
-	
 
-	available := h.stock[req.MedicineID] // kalau tidak ada, default 0
-	resp := CheckStockResponse{
-		MedicineID:   req.MedicineID,
-		RequestedQty: req.Qty,
-		AvailableQty: available,
-		IsAvailable:  available >= req.Qty,
+	result, err := h.uc.CheckStock(c.Request.Context(), domain.StockCheckRequest{
+		MedicineID: req.MedicineID,
+		Qty:        req.Qty,
+	})
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", err.Error())
+		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, CheckStockResponse{
+		MedicineID:   result.MedicineID,
+		RequestedQty: result.RequestedQty,
+		AvailableQty: result.AvailableQty,
+		IsAvailable:  result.IsAvailable,
+	})
 }
