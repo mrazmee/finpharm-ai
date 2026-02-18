@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"finpharm-ai/services/transaction/internal/domain"
@@ -40,8 +41,17 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 		Qty:        req.Qty,
 	})
 	if err != nil {
-		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", err.Error())
-		return
+		switch {
+		case errors.Is(err, domain.ErrMedicineNotFound):
+			RespondError(c, http.StatusNotFound, "MEDICINE_NOT_FOUND", "medicine not found", req.MedicineID)
+			return
+		case errors.Is(err, domain.ErrValidation):
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", nil)
+			return
+		default:
+			RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", err.Error())
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, CheckStockResponse{

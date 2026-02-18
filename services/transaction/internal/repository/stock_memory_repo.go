@@ -2,10 +2,9 @@ package repository
 
 import (
 	"context"
-	"errors"
-)
 
-var ErrMedicineNotFound = errors.New("medicine not found")
+	"finpharm-ai/services/transaction/internal/domain"
+)
 
 type StockMemoryRepo struct {
 	stock map[string]int
@@ -26,7 +25,7 @@ func (r *StockMemoryRepo) GetAvailableQty(ctx context.Context, medicineID string
 
 	qty, ok := r.stock[medicineID]
 	if !ok {
-		return 0, ErrMedicineNotFound
+		return 0, domain.ErrMedicineNotFound
 	}
 	return qty, nil
 }
