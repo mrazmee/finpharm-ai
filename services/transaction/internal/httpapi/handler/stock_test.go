@@ -28,6 +28,23 @@ func TestCheckStock_OK(t *testing.T) {
 	}
 }
 
+func TestCheckStock_MedicineNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := httpapi.NewRouter(config.Config{AppEnv: "local"})
+
+	body := []byte(`{"medicine_id":"NOTEXIST","qty":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/stock/check", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestCheckStock_InvalidBody_HasRequestID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -44,14 +61,11 @@ func TestCheckStock_InvalidBody_HasRequestID(t *testing.T) {
 		t.Fatalf("expected status 400, got %d, body=%s", w.Code, w.Body.String())
 	}
 
-	// Pastikan error response mengandung request_id
-	respBody := w.Body.String()
-	if !contains(respBody, `"request_id"`) {
-		t.Fatalf("expected response body to contain request_id, got: %s", respBody)
+	if !contains(w.Body.String(), `"request_id"`) {
+		t.Fatalf("expected response body to contain request_id, got: %s", w.Body.String())
 	}
 }
 
-// helper minimal (tanpa strings.Contains biar kamu lihat pattern)
 func contains(s, substr string) bool {
 	return bytes.Contains([]byte(s), []byte(substr))
 }
