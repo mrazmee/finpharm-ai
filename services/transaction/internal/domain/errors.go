@@ -1,8 +1,50 @@
 package domain
 
-import "errors"
+import "fmt"
 
-var (
-	ErrValidation        = errors.New("validation error")
-	ErrMedicineNotFound  = errors.New("medicine not found")
-)
+type ValidationError struct {
+	Field  string
+	Reason string
+}
+
+func (e ValidationError) Error() string {
+	if e.Field == "" {
+		return "validation error"
+	}
+	if e.Reason == "" {
+		return fmt.Sprintf("validation error on %s", e.Field)
+	}
+	return fmt.Sprintf("validation error on %s: %s", e.Field, e.Reason)
+}
+
+type NotFoundError struct {
+	Resource string
+	Key      string
+}
+
+func (e NotFoundError) Error() string {
+	if e.Resource == "" {
+		return "not found"
+	}
+	if e.Key == "" {
+		return fmt.Sprintf("%s not found", e.Resource)
+	}
+	return fmt.Sprintf("%s not found: %s", e.Resource, e.Key)
+}
+
+// helpers (optional, for cleaner comparisons)
+func IsValidation(err error) (*ValidationError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	ve, ok := err.(*ValidationError)
+	return ve, ok
+}
+
+func IsNotFound(err error) (*NotFoundError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	nf, ok := err.(*NotFoundError)
+	return nf, ok
+}

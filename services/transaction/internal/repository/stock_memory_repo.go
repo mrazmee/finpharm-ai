@@ -25,7 +25,10 @@ func (r *StockMemoryRepo) GetAvailableQty(ctx context.Context, medicineID string
 
 	qty, ok := r.stock[medicineID]
 	if !ok {
-		return 0, domain.ErrMedicineNotFound
+		return 0, &domain.NotFoundError{
+			Resource: "medicine",
+			Key:      medicineID,
+		}
 	}
 	return qty, nil
 }
