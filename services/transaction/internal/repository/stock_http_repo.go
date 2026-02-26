@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -12,14 +13,16 @@ import (
 )
 
 type StockHTTPRepo struct {
-	baseURL string
-	client  *http.Client
+	baseURL   string
+	requestID string
+	client    *http.Client
 }
 
-func NewStockHTTPRepo(baseURL string) *StockHTTPRepo {
+func NewStockHTTPRepo(baseURL string, requestID string) *StockHTTPRepo {
 	return &StockHTTPRepo{
-		baseURL: baseURL,
-		client:  &http.Client{Timeout: 4 * time.Second}, // safety net
+		baseURL:   baseURL,
+		requestID: requestID,
+		client:    &http.Client{Timeout: 4 * time.Second}, // safety net
 	}
 }
 
@@ -56,26 +59,37 @@ func (r *StockHTTPRepo) GetAvailableQty(ctx context.Context, medicineID string) 
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-
-	// propagate request-id if present in context? (we don't store it in ctx yet)
-	// For now, just mark caller service:
 	req.Header.Set("X-From-Service", "transaction")
+
+	// ✅ propagate request-id
+	if r.requestID != "" {
+		req.Header.Set("X-Request-ID", r.requestID)
+	}
 
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("inventory unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		// parse optional error body; but mapping is enough
-		return 0, &domain.NotFoundError{Resource: "medicine", Key: medicineID}
-	}
-
+	// Handle non-2xx by reading inventory error body if possible
 	if resp.StatusCode >= 400 {
 		var ie invError
 		_ = json.NewDecoder(resp.Body).Decode(&ie)
-		return 0, errors.New("inventory error")
+
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			return 0, &domain.NotFoundError{Resource: "medicine", Key: medicineID}
+		case http.StatusBadRequest:
+			// map to validation error (keep it generic)
+			return 0, &domain.ValidationError{Field: "request", Reason: "invalid"}
+		default:
+			// 5xx or others
+			if ie.Error.Message != "" {
+				return 0, errors.New(ie.Error.Message)
+			}
+			return 0, fmt.Errorf("inventory error status=%d", resp.StatusCode)
+		}
 	}
 
 	var ok invSuccess

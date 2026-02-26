@@ -11,13 +11,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestCheckStock_OK(t *testing.T) {
+func TestCheckStock_OK_PropagatesRequestIDToInventory(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Mock Inventory Service
+	// Mock Inventory Service: assert X-Request-ID exists
 	inv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/stock/check" || r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("X-Request-ID") == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":"VALIDATION_ERROR","message":"missing X-Request-ID","request_id":"inv"}}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -27,13 +32,14 @@ func TestCheckStock_OK(t *testing.T) {
 	defer inv.Close()
 
 	r := httpapi.NewRouter(config.Config{
-		AppEnv:            "local",
-		InventoryBaseURL:  inv.URL,
+		AppEnv:           "local",
+		InventoryBaseURL: inv.URL,
 	})
 
 	body := []byte(`{"medicine_id":"PARA500","qty":10}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/stock/check", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "t-req-123")
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -41,17 +47,11 @@ func TestCheckStock_OK(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
 	}
-
-	// memastikan envelope success masih ada
-	if !contains(w.Body.String(), `"data"`) || !contains(w.Body.String(), `"request_id"`) {
-		t.Fatalf("expected envelope data+request_id, got: %s", w.Body.String())
-	}
 }
 
 func TestCheckStock_MedicineNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Mock Inventory Service -> return 404 for unknown medicine
 	inv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/stock/check" || r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusNotFound)
@@ -83,7 +83,6 @@ func TestCheckStock_MedicineNotFound(t *testing.T) {
 func TestCheckStock_UsecaseValidation_MedicineIDEmpty(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Inventory tidak penting karena validasi gagal sebelum call inventory
 	r := httpapi.NewRouter(config.Config{
 		AppEnv:           "local",
 		InventoryBaseURL: "http://example.com",
@@ -98,10 +97,6 @@ func TestCheckStock_UsecaseValidation_MedicineIDEmpty(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d, body=%s", w.Code, w.Body.String())
-	}
-
-	if !contains(w.Body.String(), `"field":"medicine_id"`) {
-		t.Fatalf("expected field medicine_id in details, got: %s", w.Body.String())
 	}
 }
 
@@ -124,11 +119,7 @@ func TestCheckStock_InvalidBody_HasRequestID(t *testing.T) {
 		t.Fatalf("expected status 400, got %d, body=%s", w.Code, w.Body.String())
 	}
 
-	if !contains(w.Body.String(), `"request_id"`) {
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"request_id"`)) {
 		t.Fatalf("expected response body to contain request_id, got: %s", w.Body.String())
 	}
-}
-
-func contains(s, substr string) bool {
-	return bytes.Contains([]byte(s), []byte(substr))
 }

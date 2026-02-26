@@ -4,16 +4,19 @@ import (
 	"net/http"
 
 	"finpharm-ai/services/transaction/internal/domain"
+	"finpharm-ai/services/transaction/internal/httpapi/middleware"
+	"finpharm-ai/services/transaction/internal/repository"
+	"finpharm-ai/services/transaction/internal/usecase"
 
 	"github.com/gin-gonic/gin"
 )
 
 type StockHandler struct {
-	uc domain.StockUsecase
+	inventoryBaseURL string
 }
 
-func NewStockHandler(uc domain.StockUsecase) *StockHandler {
-	return &StockHandler{uc: uc}
+func NewStockHandler(inventoryBaseURL string) *StockHandler {
+	return &StockHandler{inventoryBaseURL: inventoryBaseURL}
 }
 
 type CheckStockRequest struct {
@@ -35,7 +38,13 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 		return
 	}
 
-	result, err := h.uc.CheckStock(c.Request.Context(), domain.StockCheckRequest{
+	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
+	rid, _ := ridVal.(string)
+
+	repo := repository.NewStockHTTPRepo(h.inventoryBaseURL, rid)
+	uc := usecase.NewStockUsecase(repo)
+
+	result, err := uc.CheckStock(c.Request.Context(), domain.StockCheckRequest{
 		MedicineID: req.MedicineID,
 		Qty:        req.Qty,
 	})
@@ -54,7 +63,6 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 			})
 			return
 		}
-
 		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", err.Error())
 		return
 	}
