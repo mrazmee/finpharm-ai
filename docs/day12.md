@@ -76,12 +76,6 @@
 
 ---
 
-## Cara menjalankan (3 terminal)
-
-### Terminal 1 — Inventory
-```powershell
-.\scripts\run-inventory.ps1
-
 ## Catatan penting (Day 12)
 - Source of truth stok dipindahkan ke **Inventory Service**.
 - Transaction sekarang menggunakan repository **HTTP** (`stock_http_repo.go`) untuk mengambil stok dari Inventory.
