@@ -14,15 +14,15 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	r := gin.New()
 	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
 
-	// Dependencies (manual DI)
-	stockRepo := repository.NewStockMemoryRepo()
+	// DI: Stock repo now calls Inventory service
+	stockRepo := repository.NewStockHTTPRepo(cfg.InventoryBaseURL)
 	stockUC := usecase.NewStockUsecase(stockRepo)
 	stockHandler := handler.NewStockHandler(stockUC)
 
-	h := handler.NewHealthHandler()
+	health := handler.NewHealthHandler()
 
-	r.GET("/", h.Hello)
-	r.GET("/health", h.Health)
+	r.GET("/", health.Hello)
+	r.GET("/health", health.Health)
 
 	v1 := r.Group("/v1")
 	{
