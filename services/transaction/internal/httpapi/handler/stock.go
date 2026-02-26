@@ -59,7 +59,7 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, CheckStockResponse{
+	RespondOK(c, http.StatusOK, CheckStockResponse{
 		MedicineID:   result.MedicineID,
 		RequestedQty: result.RequestedQty,
 		AvailableQty: result.AvailableQty,
