@@ -63,6 +63,14 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 			})
 			return
 		}
+		if ue, ok := domain.IsUpstream(err); ok {
+			RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "inventory service error", gin.H{
+				"service": ue.Service,
+				"reason":  ue.Reason,
+			})
+			return
+		}
+
 		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", err.Error())
 		return
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"finpharm-ai/services/transaction/internal/config"
 	"finpharm-ai/services/transaction/internal/httpapi"
@@ -14,7 +15,6 @@ import (
 func TestCheckStock_OK_PropagatesRequestIDToInventory(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Mock Inventory Service: assert X-Request-ID exists
 	inv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/stock/check" || r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusNotFound)
@@ -22,7 +22,6 @@ func TestCheckStock_OK_PropagatesRequestIDToInventory(t *testing.T) {
 		}
 		if r.Header.Get("X-Request-ID") == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"error":{"code":"VALIDATION_ERROR","message":"missing X-Request-ID","request_id":"inv"}}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -53,13 +52,7 @@ func TestCheckStock_MedicineNotFound(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	inv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/stock/check" || r.Method != http.MethodPost {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"MEDICINE_NOT_FOUND","message":"medicine not found","details":{"resource":"medicine","key":"PARA200"},"request_id":"inv-404"}}`))
 	}))
 	defer inv.Close()
 
@@ -77,6 +70,41 @@ func TestCheckStock_MedicineNotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected status 404, got %d, body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestCheckStock_InventoryTimeout_Returns502(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// Mock Inventory: sleep longer than repo callTimeout (2s)
+	inv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * time.Second)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"medicine_id":"PARA500","requested_qty":1,"available_qty":80,"is_available":true},"request_id":"inv-slow"}`))
+	}))
+	defer inv.Close()
+
+	r := httpapi.NewRouter(config.Config{
+		AppEnv:           "local",
+		InventoryBaseURL: inv.URL,
+	})
+
+	body := []byte(`{"medicine_id":"PARA500","qty":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/stock/check", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	start := time.Now()
+	r.ServeHTTP(w, req)
+	elapsed := time.Since(start)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("expected status 502, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	// should timeout around ~2s (not 3s), give some buffer
+	if elapsed > 2800*time.Millisecond {
+		t.Fatalf("expected request to timeout earlier, elapsed=%v", elapsed)
 	}
 }
 

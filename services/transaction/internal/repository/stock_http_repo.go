@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -16,13 +15,17 @@ type StockHTTPRepo struct {
 	baseURL   string
 	requestID string
 	client    *http.Client
+
+	// policy timeout untuk call ke inventory
+	callTimeout time.Duration
 }
 
 func NewStockHTTPRepo(baseURL string, requestID string) *StockHTTPRepo {
 	return &StockHTTPRepo{
-		baseURL:   baseURL,
-		requestID: requestID,
-		client:    &http.Client{Timeout: 4 * time.Second}, // safety net
+		baseURL:      baseURL,
+		requestID:    requestID,
+		client:       &http.Client{Timeout: 4 * time.Second}, // safety net
+		callTimeout:  2 * time.Second,                         // SLA call inventory
 	}
 }
 
@@ -53,48 +56,43 @@ type invError struct {
 func (r *StockHTTPRepo) GetAvailableQty(ctx context.Context, medicineID string) (int, error) {
 	body, _ := json.Marshal(invReq{MedicineID: medicineID, Qty: 1})
 
+	// ✅ per-call timeout
+	callCtx, cancel := context.WithTimeout(ctx, r.callTimeout)
+	defer cancel()
+
 	url := r.baseURL + "/v1/stock/check"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-From-Service", "transaction")
-
-	// ✅ propagate request-id
 	if r.requestID != "" {
 		req.Header.Set("X-Request-ID", r.requestID)
 	}
 
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("inventory unreachable: %w", err)
+		// timeout / unreachable / DNS / connection refused => upstream error
+		return 0, &domain.UpstreamError{Service: "inventory", Reason: err.Error()}
 	}
 	defer resp.Body.Close()
 
-	// Handle non-2xx by reading inventory error body if possible
 	if resp.StatusCode >= 400 {
-		var ie invError
-		_ = json.NewDecoder(resp.Body).Decode(&ie)
-
+		// 404 from inventory means medicine not found
 		switch resp.StatusCode {
 		case http.StatusNotFound:
 			return 0, &domain.NotFoundError{Resource: "medicine", Key: medicineID}
 		case http.StatusBadRequest:
-			// map to validation error (keep it generic)
 			return 0, &domain.ValidationError{Field: "request", Reason: "invalid"}
 		default:
-			// 5xx or others
-			if ie.Error.Message != "" {
-				return 0, errors.New(ie.Error.Message)
-			}
-			return 0, fmt.Errorf("inventory error status=%d", resp.StatusCode)
+			return 0, &domain.UpstreamError{Service: "inventory", Reason: fmt.Sprintf("status=%d", resp.StatusCode)}
 		}
 	}
 
 	var ok invSuccess
 	if err := json.NewDecoder(resp.Body).Decode(&ok); err != nil {
-		return 0, err
+		return 0, &domain.UpstreamError{Service: "inventory", Reason: "invalid json response"}
 	}
 
 	return ok.Data.AvailableQty, nil
