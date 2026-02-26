@@ -11,13 +11,20 @@ import (
 )
 
 func NewRouter(cfg config.Config) *gin.Engine {
+	_ = cfg
+
 	r := gin.New()
 	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
 
 	// DI
-	repo := repository.NewStockMemoryRepo()
-	uc := usecase.NewStockUsecase(repo)
-	stock := handler.NewStockHandler(uc)
+	stockRepo := repository.NewStockMemoryRepo()
+	stockUC := usecase.NewStockUsecase(stockRepo)
+	stockHandler := handler.NewStockHandler(stockUC)
+
+	medRepo := repository.NewMedicineMemoryRepo()
+	medUC := usecase.NewMedicineUsecase(medRepo)
+	medHandler := handler.NewMedicineHandler(medUC)
+
 	health := handler.NewHealthHandler()
 
 	r.GET("/", health.Hello)
@@ -25,7 +32,8 @@ func NewRouter(cfg config.Config) *gin.Engine {
 
 	v1 := r.Group("/v1")
 	{
-		v1.POST("/stock/check", stock.CheckStock)
+		v1.POST("/stock/check", stockHandler.CheckStock)
+		v1.GET("/medicines", medHandler.ListMedicines)
 	}
 
 	return r
