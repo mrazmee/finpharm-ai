@@ -45,7 +45,6 @@ func (r *MedicineMemoryRepo) List(ctx context.Context, q domain.ListMedicinesQue
 		end = total
 	}
 
-	// copy slice to avoid unexpected sharing issues
 	items := make([]domain.Medicine, 0, end-offset)
 	for i := offset; i < end; i++ {
 		items = append(items, r.items[i])
@@ -57,4 +56,18 @@ func (r *MedicineMemoryRepo) List(ctx context.Context, q domain.ListMedicinesQue
 		Offset: offset,
 		Total:  total,
 	}, nil
+}
+
+func (r *MedicineMemoryRepo) GetByID(ctx context.Context, id string) (domain.Medicine, error) {
+	_ = ctx
+
+	for _, m := range r.items {
+		if m.ID == id {
+			return m, nil
+		}
+	}
+	return domain.Medicine{}, &domain.NotFoundError{
+		Resource: "medicine",
+		Key:      id,
+	}
 }

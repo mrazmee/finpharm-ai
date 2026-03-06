@@ -60,6 +60,36 @@ func (h *MedicineHandler) ListMedicines(c *gin.Context) {
 	})
 }
 
+func (h *MedicineHandler) GetMedicine(c *gin.Context) {
+	id := c.Param("id")
+
+	m, err := h.uc.GetMedicine(c.Request.Context(), id)
+	if err != nil {
+		if ve, ok := domain.IsValidation(err); ok {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  ve.Field,
+				"reason": ve.Reason,
+			})
+			return
+		}
+		if nf, ok := domain.IsNotFound(err); ok {
+			RespondError(c, http.StatusNotFound, "MEDICINE_NOT_FOUND", "medicine not found", gin.H{
+				"resource": nf.Resource,
+				"key":      nf.Key,
+			})
+			return
+		}
+		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get medicine", err.Error())
+		return
+	}
+
+	RespondOK(c, http.StatusOK, MedicineDTO{
+		ID:   m.ID,
+		Name: m.Name,
+		Type: m.Type,
+	})
+}
+
 func parseIntDefault(s string, def int) int {
 	if s == "" {
 		return def

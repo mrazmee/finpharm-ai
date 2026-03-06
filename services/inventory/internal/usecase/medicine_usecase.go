@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strings"
 
 	"finpharm-ai/services/inventory/internal/domain"
 )
@@ -15,6 +16,15 @@ func NewMedicineUsecase(repo domain.MedicineRepository) *MedicineUsecase {
 }
 
 func (u *MedicineUsecase) ListMedicines(ctx context.Context, q domain.ListMedicinesQuery) (domain.ListMedicinesResult, error) {
-	// business rules for pagination could be placed here later
 	return u.repo.List(ctx, q)
+}
+
+func (u *MedicineUsecase) GetMedicine(ctx context.Context, id string) (domain.Medicine, error) {
+	if strings.TrimSpace(id) == "" {
+		return domain.Medicine{}, &domain.ValidationError{
+			Field:  "id",
+			Reason: "is required",
+		}
+	}
+	return u.repo.GetByID(ctx, id)
 }

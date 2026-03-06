@@ -22,8 +22,10 @@ type ListMedicinesResult struct {
 
 type MedicineRepository interface {
 	List(ctx context.Context, q ListMedicinesQuery) (ListMedicinesResult, error)
+	GetByID(ctx context.Context, id string) (Medicine, error)
 }
 
 type MedicineUsecase interface {
 	ListMedicines(ctx context.Context, q ListMedicinesQuery) (ListMedicinesResult, error)
+	GetMedicine(ctx context.Context, id string) (Medicine, error)
 }
