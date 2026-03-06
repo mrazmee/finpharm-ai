@@ -59,7 +59,7 @@ func (h *StockProxyHandler) CheckStock(c *gin.Context) {
 	rid, _ := ridVal.(string)
 	upReq.Header.Set(middleware.HeaderRequestID, rid)
 
-	upReq.Header.Set("X-From-Gateway", "finpharm-gateway")
+	upReq.Header.Set("X-Caller-Service", "gateway")
 
 	resp, err := h.client.Do(upReq)
 	if err != nil {

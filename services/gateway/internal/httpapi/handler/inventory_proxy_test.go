@@ -19,6 +19,12 @@ func TestGatewayInventory_ListMedicines_ProxyOK(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+
+		if r.Header.Get("X-Caller-Service") != "gateway" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"data":{"items":[],"limit":10,"offset":0,"total":0},"request_id":"inv"}`))
@@ -48,6 +54,12 @@ func TestGatewayInventory_GetMedicine_ProxyOK(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+
+		if r.Header.Get("X-Caller-Service") != "gateway" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"data":{"id":"PARA500","name":"Paracetamol 500mg","type":"OTC"},"request_id":"inv"}`))

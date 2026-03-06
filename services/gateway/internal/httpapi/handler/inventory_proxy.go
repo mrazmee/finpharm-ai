@@ -42,7 +42,8 @@ func (h *InventoryProxyHandler) ListMedicines(c *gin.Context) {
 	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
 	rid, _ := ridVal.(string)
 	req.Header.Set(middleware.HeaderRequestID, rid)
-	req.Header.Set("X-From-Gateway", "finpharm-gateway")
+
+	req.Header.Set("X-Caller-Service", "gateway")
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -76,7 +77,8 @@ func (h *InventoryProxyHandler) GetMedicine(c *gin.Context) {
 	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
 	rid, _ := ridVal.(string)
 	req.Header.Set(middleware.HeaderRequestID, rid)
-	req.Header.Set("X-From-Gateway", "finpharm-gateway")
+
+	req.Header.Set("X-Caller-Service", "gateway")
 
 	resp, err := h.client.Do(req)
 	if err != nil {

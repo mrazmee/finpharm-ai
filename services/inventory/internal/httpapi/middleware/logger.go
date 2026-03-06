@@ -27,7 +27,7 @@ func RequestLogger() gin.HandlerFunc {
 			"path", path,
 			"status", c.Writer.Status(),
 			"duration_ms", time.Since(start).Milliseconds(),
-			"from_service", c.GetHeader("X-From-Service"),
+			"caller_service", c.GetHeader("X-Caller-Service"),
 			"errors", len(c.Errors),
 		)
 	}

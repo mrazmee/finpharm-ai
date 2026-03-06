@@ -24,6 +24,12 @@ func TestCheckStock_OK_PropagatesRequestIDToInventory(t *testing.T) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
+
+		if r.Header.Get("X-Caller-Service") != "transaction" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"data":{"medicine_id":"PARA500","requested_qty":10,"available_qty":80,"is_available":true},"request_id":"inv-1"}`))
@@ -76,7 +82,6 @@ func TestCheckStock_MedicineNotFound(t *testing.T) {
 func TestCheckStock_InventoryTimeout_Returns502(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Mock Inventory: sleep longer than repo callTimeout (2s)
 	inv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(3 * time.Second)
 		w.WriteHeader(http.StatusOK)
@@ -102,7 +107,6 @@ func TestCheckStock_InventoryTimeout_Returns502(t *testing.T) {
 		t.Fatalf("expected status 502, got %d, body=%s", w.Code, w.Body.String())
 	}
 
-	// should timeout around ~2s (not 3s), give some buffer
 	if elapsed > 2800*time.Millisecond {
 		t.Fatalf("expected request to timeout earlier, elapsed=%v", elapsed)
 	}
