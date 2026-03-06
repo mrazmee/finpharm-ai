@@ -13,15 +13,22 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
 
 	h := handler.NewHealthHandler()
-	proxy := handler.NewStockProxyHandler(cfg.TransactionBaseURL)
+	txProxy := handler.NewStockProxyHandler(cfg.TransactionBaseURL)
+	invProxy := handler.NewInventoryProxyHandler(cfg.InventoryBaseURL)
 
 	r.GET("/", h.Hello)
 	r.GET("/health", h.Health)
 
 	v1 := r.Group("/v1")
 	{
-		v1.POST("/stock/check", proxy.CheckStock)
+		// Transaction routes
+		v1.POST("/stock/check", txProxy.CheckStock)
 
+		// Inventory routes (NEW)
+		v1.GET("/medicines", invProxy.ListMedicines)
+		v1.GET("/medicines/:id", invProxy.GetMedicine)
+
+		// Debug route (local/dev only)
 		if cfg.IsDebugEnabled() {
 			debugProxy := handler.NewDebugProxyHandler(cfg.TransactionBaseURL)
 			v1.GET("/debug/sleep", debugProxy.Sleep)

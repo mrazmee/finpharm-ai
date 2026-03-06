@@ -11,6 +11,7 @@ type Config struct {
 	Port   string
 
 	TransactionBaseURL string
+	InventoryBaseURL   string
 
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
@@ -21,7 +22,9 @@ type Config struct {
 func Load() Config {
 	appEnv := getEnv("APP_ENV", "local")
 	port := getEnv("PORT", "8080")
+
 	txURL := getEnv("TRANSACTION_BASE_URL", "http://localhost:8081")
+	invURL := getEnv("INVENTORY_BASE_URL", "http://localhost:8082")
 
 	readMs := getEnvInt("READ_TIMEOUT_MS", 5000)
 	writeMs := getEnvInt("WRITE_TIMEOUT_MS", 5000)
@@ -32,6 +35,7 @@ func Load() Config {
 		AppEnv:             appEnv,
 		Port:               port,
 		TransactionBaseURL: txURL,
+		InventoryBaseURL:   invURL,
 		ReadTimeout:        time.Duration(readMs) * time.Millisecond,
 		WriteTimeout:       time.Duration(writeMs) * time.Millisecond,
 		IdleTimeout:        time.Duration(idleMs) * time.Millisecond,

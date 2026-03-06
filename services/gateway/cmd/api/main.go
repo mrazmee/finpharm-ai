@@ -36,6 +36,7 @@ func main() {
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),
 			"transaction_base_url", cfg.TransactionBaseURL,
+			"inventory_base_url", cfg.InventoryBaseURL,
 		)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server_error", "error", err)
