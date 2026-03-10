@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -32,8 +33,8 @@ func Load() Config {
 
 	invURL := getEnv("INVENTORY_BASE_URL", "http://localhost:8082")
 
-	dbHost := getEnv("DB_HOST", "localhost")
-	dbPort := getEnv("DB_PORT", "5432")
+	dbHost := getEnv("DB_HOST", "127.0.0.1")
+	dbPort := getEnv("DB_PORT", "55432")
 	dbUser := getEnv("DB_USER", "finpharm")
 	dbPassword := getEnv("DB_PASSWORD", "finpharm")
 	dbName := getEnv("DB_NAME", "transaction_db")
@@ -67,13 +68,13 @@ func (c Config) IsDebugEnabled() bool {
 
 func (c Config) DBConnString() string {
 	return fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
+		url.QueryEscape(c.DBUser),
+		url.QueryEscape(c.DBPassword),
 		c.DBHost,
 		c.DBPort,
-		c.DBUser,
-		c.DBPassword,
 		c.DBName,
-		c.DBSSLMode,
+		url.QueryEscape(c.DBSSLMode),
 	)
 }
 

@@ -4,26 +4,19 @@ import (
 	"finpharm-ai/services/inventory/internal/config"
 	"finpharm-ai/services/inventory/internal/httpapi/handler"
 	"finpharm-ai/services/inventory/internal/httpapi/middleware"
-	"finpharm-ai/services/inventory/internal/repository"
-	"finpharm-ai/services/inventory/internal/usecase"
 
 	"github.com/gin-gonic/gin"
 )
 
-func NewRouter(cfg config.Config) *gin.Engine {
+func NewRouter(
+	cfg config.Config,
+	stockHandler *handler.StockHandler,
+	medHandler *handler.MedicineHandler,
+) *gin.Engine {
 	_ = cfg
 
 	r := gin.New()
 	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
-
-	// DI
-	stockRepo := repository.NewStockMemoryRepo()
-	stockUC := usecase.NewStockUsecase(stockRepo)
-	stockHandler := handler.NewStockHandler(stockUC)
-
-	medRepo := repository.NewMedicineMemoryRepo()
-	medUC := usecase.NewMedicineUsecase(medRepo)
-	medHandler := handler.NewMedicineHandler(medUC)
 
 	health := handler.NewHealthHandler()
 
