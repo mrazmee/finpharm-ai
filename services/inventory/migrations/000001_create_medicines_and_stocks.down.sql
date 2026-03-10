@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS stocks;
+DROP TABLE IF EXISTS medicines;
