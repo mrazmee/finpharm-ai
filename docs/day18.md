@@ -62,6 +62,38 @@
   - tambah field DB config dan helper connection string
 
 ## Cara verifikasi
+
 ### 1. Jalankan PostgreSQL
 ```bash
 docker compose up -d postgres
+```
+
+### 2. Cek container hidup
+```bash
+docker ps
+```
+
+Pastikan ada container PostgreSQL untuk project ini.
+
+### 3. Jalankan Inventory Service
+```powershell
+.\scripts\run-inventory.ps1
+```
+
+Pada tahap Day 18, inventory memang belum wajib memakai repository PostgreSQL. Fokusnya masih memastikan config DB dan environment local sudah siap.
+
+### 4. Jalankan Transaction Service
+```powershell
+.\scripts\run-transaction.ps1
+```
+
+### 5. Pastikan config DB terbaca
+Lihat log startup masing-masing service dan pastikan nilai default DB mengarah ke:
+- host `127.0.0.1`
+- port `55432`
+- database `inventory_db` atau `transaction_db`
+
+## Self-Review
+- Kenapa untuk local dev kita boleh memakai **1 Postgres instance** tetapi tetap memisahkan **database logical per service**?
+- Apa bedanya **menyiapkan DB config** dengan **benar-benar memindahkan repository ke DB**?
+- Kenapa perubahan infra seperti Docker Compose juga harus ikut tercermin di `README.md`?

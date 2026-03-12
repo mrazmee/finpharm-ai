@@ -15,7 +15,7 @@ type StockCheckResult struct {
 }
 
 type StockRepository interface {
-	GetAvailableQty(ctx context.Context, medicineID string) (int, error)
+	GetAvailableQty(ctx context.Context, medicineID string, requestedQty int) (int, error)
 }
 
 type StockUsecase interface {

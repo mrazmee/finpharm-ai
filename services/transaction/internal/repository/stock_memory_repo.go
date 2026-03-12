@@ -20,8 +20,9 @@ func NewStockMemoryRepo() *StockMemoryRepo {
 	}
 }
 
-func (r *StockMemoryRepo) GetAvailableQty(ctx context.Context, medicineID string) (int, error) {
+func (r *StockMemoryRepo) GetAvailableQty(ctx context.Context, medicineID string, requestedQty int) (int, error) {
 	_ = ctx
+	_ = requestedQty
 
 	qty, ok := r.stock[medicineID]
 	if !ok {

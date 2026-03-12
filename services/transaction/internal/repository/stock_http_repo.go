@@ -33,7 +33,7 @@ func NewStockHTTPRepo(baseURL string, client *http.Client, breaker *CircuitBreak
 		client:      client,
 		callTimeout: 2 * time.Second,
 		breaker:     breaker,
-		retries:     1, // retry 1x
+		retries:     1,
 	}
 }
 
@@ -52,17 +52,12 @@ type invSuccess struct {
 	RequestID string `json:"request_id"`
 }
 
-// GetAvailableQty implements domain.StockRepository.
-// requestID is passed through ctx via context value? We keep it explicit here for simplicity:
-func (r *StockHTTPRepo) GetAvailableQty(ctx context.Context, medicineID string) (int, error) {
-	// no request-id in this interface; use ctx value if present
+func (r *StockHTTPRepo) GetAvailableQty(ctx context.Context, medicineID string, requestedQty int) (int, error) {
 	rid := RequestIDFromContext(ctx)
-
-	return r.getAvailableQty(ctx, medicineID, rid)
+	return r.getAvailableQty(ctx, medicineID, requestedQty, rid)
 }
 
-// internal with request-id
-func (r *StockHTTPRepo) getAvailableQty(ctx context.Context, medicineID string, requestID string) (int, error) {
+func (r *StockHTTPRepo) getAvailableQty(ctx context.Context, medicineID string, requestedQty int, requestID string) (int, error) {
 	now := time.Now()
 	if !r.breaker.Allow(now) {
 		return 0, &domain.UpstreamError{Service: "inventory", Reason: "circuit breaker open"}
@@ -70,15 +65,14 @@ func (r *StockHTTPRepo) getAvailableQty(ctx context.Context, medicineID string, 
 
 	var lastErr error
 	for attempt := 0; attempt <= r.retries; attempt++ {
-		qty, err := r.callInventory(ctx, medicineID, requestID)
+		qty, err := r.callInventory(ctx, medicineID, requestedQty, requestID)
 		if err == nil {
 			r.breaker.OnSuccess(time.Now())
 			return qty, nil
 		}
 
-		// If not retryable, break immediately
 		if _, ok := domain.IsNotFound(err); ok {
-			r.breaker.OnSuccess(time.Now()) // not-found is not an upstream failure
+			r.breaker.OnSuccess(time.Now())
 			return 0, err
 		}
 		if _, ok := domain.IsValidation(err); ok {
@@ -87,22 +81,22 @@ func (r *StockHTTPRepo) getAvailableQty(ctx context.Context, medicineID string, 
 		}
 
 		lastErr = err
-		// retryable only for UpstreamError
 		if _, ok := domain.IsUpstream(err); !ok {
 			break
 		}
 
-		// simple backoff
 		time.Sleep(time.Duration(50*(attempt+1)) * time.Millisecond)
 	}
 
-	// failure affects breaker
 	r.breaker.OnFailure(time.Now())
 	return 0, lastErr
 }
 
-func (r *StockHTTPRepo) callInventory(ctx context.Context, medicineID string, requestID string) (int, error) {
-	body, _ := json.Marshal(invReq{MedicineID: medicineID, Qty: 1})
+func (r *StockHTTPRepo) callInventory(ctx context.Context, medicineID string, requestedQty int, requestID string) (int, error) {
+	body, err := json.Marshal(invReq{MedicineID: medicineID, Qty: requestedQty})
+	if err != nil {
+		return 0, fmt.Errorf("marshal inventory request: %w", err)
+	}
 
 	callCtx, cancel := context.WithTimeout(ctx, r.callTimeout)
 	defer cancel()

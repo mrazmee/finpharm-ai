@@ -1,22 +1,37 @@
 # FinPharm-AI
 
-FinPharm-AI adalah project portfolio backend microservices berbasis Go yang dibuat dengan pendekatan *learn by doing*. Domain yang dipilih adalah farmasi dan transaksi, agar tetap relevan dengan proses belajar backend service, sistem finansial ringan, serta kebutuhan integrasi AI di tahap berikutnya.
+FinPharm-AI adalah project portfolio backend microservices berbasis Go yang dibuat dengan pendekatan *learn by doing*. Domain yang dipilih adalah farmasi dan transaksi agar tetap relevan dengan proses belajar backend service, sistem finansial ringan, dan integrasi AI pada tahap berikutnya.
 
-Project ini dirancang agar tidak hanya sekadar “jalan”, tetapi juga menunjukkan pemahaman terhadap praktik kerja industri seperti API Gateway, service boundary yang jelas, request tracing, standard response, resilience dasar, dan persiapan persistence per service. Saat ini Phase 2 sudah selesai, dan project sedang memasuki awal Phase 3 untuk fondasi PostgreSQL.
+Project ini dirancang supaya tidak hanya sekadar “jalan”, tetapi juga menunjukkan pemahaman terhadap praktik kerja industri seperti API Gateway, service boundary yang jelas, request tracing, standard response, resilience dasar, persistence per service, dan dokumentasi progres yang rapi.
+
+## Current Status
+
+Posisi project saat ini:
+
+- **Phase 1 selesai**: gateway dan transaction sudah stabil untuk contract awal.
+- **Phase 2 selesai**: clean architecture dasar, inventory service, routing gateway, request-id, logging, timeout, testing dasar, retry ringan, dan circuit breaker minimal sudah ada.
+- **Phase 3 sedang berjalan**:
+  - `Inventory Service` sudah memakai **PostgreSQL + sqlx** saat dijalankan normal.
+  - migration inventory pertama sudah tersedia.
+  - `Transaction Service` **baru menyiapkan config database**, tetapi **belum** memakai persistence secara nyata.
+
+Jadi kondisi repo saat ini paling tepat dibaca sebagai:
+
+> fondasi microservices sudah stabil, inventory persistence sudah hidup, dan transaction persistence akan menjadi fokus berikutnya.
 
 ## Architecture
 
 FinPharm-AI menggunakan arsitektur microservices sederhana dengan tiga service utama:
 
-* **Gateway Service** berperan sebagai *single entry point* untuk client. Tugasnya fokus pada routing, proxy, request-id propagation, dan logging.
-* **Transaction Service** berperan sebagai orchestration service untuk alur `stock check`. Service ini menerima request dari Gateway lalu memanggil Inventory Service.
-* **Inventory Service** berperan sebagai source of truth untuk data obat dan stok, termasuk endpoint medicines list, medicine detail, dan stock check.
+- **Gateway Service** sebagai *single entry point* untuk client. Tugasnya fokus pada routing, proxy, request-id propagation, dan logging.
+- **Transaction Service** sebagai orchestration service untuk alur `stock check`. Service ini menerima request dari Gateway lalu memanggil Inventory Service.
+- **Inventory Service** sebagai source of truth untuk data obat dan stok, termasuk endpoint medicines list, medicine detail, dan stock check.
 
 Alur utama saat ini:
 
-* `Client -> Gateway -> Transaction -> Inventory` untuk `POST /v1/stock/check`
-* `Client -> Gateway -> Inventory` untuk `GET /v1/medicines`
-* `Client -> Gateway -> Inventory` untuk `GET /v1/medicines/:id`
+- `Client -> Gateway -> Transaction -> Inventory` untuk `POST /v1/stock/check`
+- `Client -> Gateway -> Inventory` untuk `GET /v1/medicines`
+- `Client -> Gateway -> Inventory` untuk `GET /v1/medicines/:id`
 
 ## Repository Structure
 
@@ -39,18 +54,18 @@ finpharm-ai/
 
 ## Services
 
-| Service     | Port | Description                                                                                |
-|-------------|------|--------------------------------------------------------------------------------------------|
-| gateway     | 8080 | Edge service untuk routing, proxy, request-id propagation, dan logging                   |
+| Service     | Port | Description |
+|-------------|------|-------------|
+| gateway     | 8080 | Edge service untuk routing, proxy, request-id propagation, dan logging |
 | transaction | 8081 | Orchestration service untuk stock check, termasuk retry ringan dan circuit breaker minimal |
-| inventory   | 8082 | Source of truth untuk medicines catalog dan stock                                         |
-| postgres    | 5432 | Database foundation untuk Phase 3, memakai 1 instance dengan multi-database per service  |
+| inventory   | 8082 | Source of truth untuk medicines catalog dan stock |
+| postgres    | 55432 (host) / 5432 (container) | Database foundation untuk Phase 3, memakai 1 instance dengan database logical terpisah per service |
 
 ## Requirements
 
-* Go sesuai versi pada `go.mod`
-* Docker Desktop
-* PowerShell untuk menjalankan script `.ps1`
+- Go sesuai versi pada `go.mod`
+- Docker Desktop
+- PowerShell untuk menjalankan script `.ps1`
 
 Cek versi Go:
 
@@ -67,25 +82,35 @@ docker compose version
 
 ## Running the Project
 
-### Terminal 1 — PostgreSQL
+### 1. Jalankan PostgreSQL
 
 ```bash
 docker compose up -d postgres
 ```
 
-### Terminal 2 — Inventory Service
+### 2. Jalankan migration inventory
+
+```powershell
+.\scripts\migrate-inventory-up.ps1
+```
+
+Catatan:
+- langkah ini diperlukan karena `Inventory Service` default-nya sudah memakai `postgres`
+- saat ini migration yang sudah tersedia baru untuk inventory
+
+### 3. Jalankan Inventory Service
 
 ```powershell
 .\scripts\run-inventory.ps1
 ```
 
-### Terminal 3 — Transaction Service
+### 4. Jalankan Transaction Service
 
 ```powershell
 .\scripts\run-transaction.ps1
 ```
 
-### Terminal 4 — Gateway Service
+### 5. Jalankan Gateway Service
 
 ```powershell
 .\scripts\run-gateway.ps1
@@ -101,36 +126,37 @@ docker compose down
 
 ### Common
 
-* `APP_ENV` — default `local`
-* `PORT`
-* `READ_TIMEOUT_MS` — default `5000`
-* `WRITE_TIMEOUT_MS` — default `5000`
-* `IDLE_TIMEOUT_MS` — default `30000`
-* `SHUTDOWN_TIMEOUT_MS` — default `7000`
+- `APP_ENV` — default `local`
+- `PORT`
+- `READ_TIMEOUT_MS` — default `5000`
+- `WRITE_TIMEOUT_MS` — default `5000`
+- `IDLE_TIMEOUT_MS` — default `30000`
+- `SHUTDOWN_TIMEOUT_MS` — default `7000`
 
 ### Gateway
 
-* `TRANSACTION_BASE_URL` — default `http://localhost:8081`
-* `INVENTORY_BASE_URL` — default `http://localhost:8082`
+- `TRANSACTION_BASE_URL` — default `http://localhost:8081`
+- `INVENTORY_BASE_URL` — default `http://localhost:8082`
 
 ### Transaction
 
-* `INVENTORY_BASE_URL` — default `http://localhost:8082`
-* `DB_HOST` — default `localhost`
-* `DB_PORT` — default `5432`
-* `DB_USER` — default `finpharm`
-* `DB_PASSWORD` — default `finpharm`
-* `DB_NAME` — default `transaction_db`
-* `DB_SSLMODE` — default `disable`
+- `INVENTORY_BASE_URL` — default `http://localhost:8082`
+- `DB_HOST` — default `127.0.0.1`
+- `DB_PORT` — default `55432`
+- `DB_USER` — default `finpharm`
+- `DB_PASSWORD` — default `finpharm`
+- `DB_NAME` — default `transaction_db`
+- `DB_SSLMODE` — default `disable`
 
 ### Inventory
 
-* `DB_HOST` — default `localhost`
-* `DB_PORT` — default `5432`
-* `DB_USER` — default `finpharm`
-* `DB_PASSWORD` — default `finpharm`
-* `DB_NAME` — default `inventory_db`
-* `DB_SSLMODE` — default `disable`
+- `STORAGE_DRIVER` — default `postgres` dari `scripts/run-inventory.ps1`
+- `DB_HOST` — default `127.0.0.1`
+- `DB_PORT` — default `55432`
+- `DB_USER` — default `finpharm`
+- `DB_PASSWORD` — default `finpharm`
+- `DB_NAME` — default `inventory_db`
+- `DB_SSLMODE` — default `disable`
 
 ## API Endpoints
 
@@ -230,8 +256,8 @@ Project ini menggunakan GitHub Actions melalui file `.github/workflows/ci.yml`.
 
 CI akan berjalan otomatis pada:
 
-* push ke branch `main`
-* setiap pull request
+- push ke branch `main`
+- setiap pull request
 
 Command yang dijalankan di CI:
 
@@ -241,27 +267,31 @@ go test ./... -v
 
 ## Implemented Best Practices
 
-* API Gateway sebagai edge service yang tipis
-* Request ID propagation menggunakan `X-Request-ID`
-* Caller service header standar menggunakan `X-Caller-Service`
-* Structured logging dengan `log/slog`
-* Graceful shutdown dan HTTP server timeouts
-* Manual dependency injection
-* Standard response envelope untuk success dan error
-* Retry ringan pada Transaction Service saat call ke Inventory
-* Circuit breaker minimal pada Transaction Service
-* Unit testing handler dan proxy dengan `httptest`
-* Dokumentasi progress harian di folder `docs/`
+- API Gateway sebagai edge service yang tipis
+- Request ID propagation menggunakan `X-Request-ID`
+- Caller service header standar menggunakan `X-Caller-Service`
+- Structured logging dengan `log/slog`
+- Graceful shutdown dan HTTP server timeouts
+- Manual dependency injection
+- Standard response envelope untuk success dan error
+- Retry ringan pada Transaction Service saat call ke Inventory
+- Circuit breaker minimal pada Transaction Service
+- Inventory persistence memakai PostgreSQL + `sqlx`
+- Unit testing handler dan proxy dengan `httptest`
+- Dokumentasi progress harian di folder `docs/`
 
-## Roadmap
+## Roadmap Berikutnya
 
-* Phase 3 — PostgreSQL persistence untuk Inventory dan Transaction
-* Migration per service dengan boundary yang jelas
-* Inventory repository pindah dari in-memory ke database
-* Transaction persistence untuk transaksi real
-* Idempotency key untuk transaksi
-* Pagination dan filtering yang lebih solid
-* Phase 4 — AI Auditor Service dengan Gemini/OpenAI
-* Phase 5 — RAG untuk SOP farmasi
-* Phase 6 — Event-driven workflow dengan RabbitMQ
-* Phase 7 — Security, metrics, audit logging, dan hardening
+Fokus terdekat setelah cleanup ini:
+
+- migration `Transaction Service`
+- tabel `transactions` dan `transaction_items`
+- repository transaction berbasis `sqlx`
+- create transaction flow dengan DB transaction
+- idempotency key
+
+## Catatan Penting
+
+- Local development saat ini memakai **1 Postgres instance** dengan **database logical terpisah per service**. Ini adalah kompromi local dev yang tetap menjaga ownership boundary.
+- `Transaction Service` saat ini masih orchestration HTTP dan belum menyimpan transaksi ke DB.
+- Dokumentasi harian yang lebih detail ada di folder `docs/`, terutama `day18.md`, `day19.md`, `day20.md`, dan `day20add.md`.

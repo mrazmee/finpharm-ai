@@ -1,12 +1,24 @@
-# Transaction Migrations
+## `services/inventory/migrations/README.md`
 
-Folder ini disiapkan untuk migration milik `Transaction Service`.
+# Inventory Migrations
 
-Pada tahap Day 19, migration yang sudah dibuat baru untuk `Inventory Service`, karena inventory akan menjadi service pertama yang dipindahkan dari in-memory ke PostgreSQL.
+Folder ini berisi migration milik `Inventory Service`.
 
-Migration transaction akan ditambahkan ketika mulai membuat tabel seperti:
+Migration pertama yang sudah tersedia saat ini adalah:
 
-- `transactions`
-- `transaction_items`
+- `000001_create_medicines_and_stocks.up.sql`
+- `000001_create_medicines_and_stocks.down.sql`
 
-Tujuannya agar ownership database per service tetap jelas sejak awal.
+Tujuan migration inventory saat ini:
+
+- membuat tabel `medicines`
+- membuat tabel `stocks`
+- menambahkan seed data awal untuk medicines dan stock
+
+Kenapa migration dipisah per service:
+
+- menjaga ownership database tetap jelas
+- memudahkan evolusi schema per service
+- lebih dekat dengan praktik microservices di industri
+
+Migration untuk `Transaction Service` disimpan di folder terpisah: `services/transaction/migrations`.

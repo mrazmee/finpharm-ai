@@ -45,3 +45,43 @@
 go get github.com/jmoiron/sqlx
 go get github.com/lib/pq
 go mod tidy
+```
+
+### 2. Jalankan PostgreSQL
+```bash
+docker compose up -d postgres
+```
+
+### 3. Jalankan migration inventory
+```powershell
+.\scripts\migrate-inventory-up.ps1
+```
+
+### 4. Jalankan Inventory Service
+```powershell
+.\scripts\run-inventory.ps1
+```
+
+Karena `STORAGE_DRIVER` default sekarang `postgres`, service akan mencoba connect ke database inventory.
+
+### 5. Uji endpoint inventory langsung
+```bash
+curl -i "http://localhost:8082/v1/medicines?limit=2&offset=0"
+```
+
+### 6. Uji stock check
+```bash
+curl -i -X POST http://localhost:8082/v1/stock/check \
+  -H "Content-Type: application/json" \
+  -d "{\"medicine_id\":\"PARA500\",\"qty\":10}"
+```
+
+### 7. Jalankan test inventory
+```bash
+go test ./services/inventory/... -v
+```
+
+## Self-Review
+- Kenapa `sqlx` cocok untuk tahap belajar backend yang ingin tetap dekat dengan SQL?
+- Kenapa wiring dependency dipindahkan ke `main.go`, bukan dibuat di dalam handler?
+- Kenapa unit test handler tetap lebih baik memakai dependency in-memory meskipun service normal sudah pindah ke PostgreSQL?

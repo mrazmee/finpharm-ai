@@ -29,7 +29,7 @@ func (u *StockUsecase) CheckStock(ctx context.Context, req domain.StockCheckRequ
 		}
 	}
 
-	available, err := u.repo.GetAvailableQty(ctx, req.MedicineID)
+	available, err := u.repo.GetAvailableQty(ctx, req.MedicineID, req.Qty)
 	if err != nil {
 		return domain.StockCheckResult{}, err
 	}
