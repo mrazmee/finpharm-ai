@@ -1,17 +1,32 @@
-## `services/transaction/migrations/README.md`
+# Transaction Service Migrations
 
-```markdown
-# Transaction Migrations
+Folder ini berisi migration SQL untuk database milik `Transaction Service`.
 
-Folder ini disiapkan untuk migration milik `Transaction Service`.
+## Kenapa dipisah?
+Walaupun saat ini local development masih memakai **1 PostgreSQL instance**, setiap service tetap harus punya ownership schema masing-masing.
 
-Pada tahap sebelum Day 21, migration konkret untuk transaction memang belum dibuat karena fokus Phase 3 baru menyelesaikan persistence di `Inventory Service` terlebih dahulu.
+Artinya:
+- migration inventory ada di folder migration inventory
+- migration transaction ada di folder migration transaction
+- perubahan schema transaction tidak dicampur ke migration inventory
 
-Rencana awal migration transaction:
+## Catatan desain
+`transaction_items.medicine_id` sengaja **tidak** dibuat foreign key ke tabel `inventory.medicines`.
 
-- tabel `transactions`
-- tabel `transaction_items`
-- kebutuhan pendukung seperti kolom atau tabel untuk idempotency pada tahap berikutnya
+Alasannya:
+- `Inventory Service` dan `Transaction Service` adalah boundary yang berbeda
+- transaction hanya menyimpan referensi ID obat yang dipakai saat transaksi dibuat
+- pada microservices, service tidak boleh bergantung pada foreign key lintas service meskipun saat local dev masih memakai 1 instance Postgres
 
-Tujuannya agar boundary persistence per service tetap jelas sejak awal dan tidak bercampur dengan migration inventory.
+## Cara menjalankan
+Naikkan migration:
+
+```powershell
+.\scripts\migrate-transaction-up.ps1
+```
+
+Turunkan 1 migration terakhir:
+
+```powershell
+.\scripts\migrate-transaction-down.ps1
 ```

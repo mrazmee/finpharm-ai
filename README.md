@@ -12,12 +12,13 @@ Posisi project saat ini:
 - **Phase 2 selesai**: clean architecture dasar, inventory service, routing gateway, request-id, logging, timeout, testing dasar, retry ringan, dan circuit breaker minimal sudah ada.
 - **Phase 3 sedang berjalan**:
   - `Inventory Service` sudah memakai **PostgreSQL + sqlx** saat dijalankan normal.
-  - migration inventory pertama sudah tersedia.
-  - `Transaction Service` **baru menyiapkan config database**, tetapi **belum** memakai persistence secara nyata.
+  - migration inventory pertama sudah tersedia dan sudah dipakai untuk tabel `medicines` + `stocks`.
+  - migration awal `Transaction Service` sudah tersedia untuk tabel `transactions` + `transaction_items`.
+  - `Transaction Service` masih **belum** menyimpan transaksi ke database pada runtime; wiring repository `sqlx` dan create transaction use case akan menjadi fokus berikutnya.
 
 Jadi kondisi repo saat ini paling tepat dibaca sebagai:
 
-> fondasi microservices sudah stabil, inventory persistence sudah hidup, dan transaction persistence akan menjadi fokus berikutnya.
+> fondasi microservices sudah stabil, inventory persistence sudah hidup, dan transaction persistence sedang mulai dibangun dari schema migration.
 
 ## Architecture
 
@@ -57,7 +58,7 @@ finpharm-ai/
 | Service     | Port | Description |
 |-------------|------|-------------|
 | gateway     | 8080 | Edge service untuk routing, proxy, request-id propagation, dan logging |
-| transaction | 8081 | Orchestration service untuk stock check, termasuk retry ringan dan circuit breaker minimal |
+| transaction | 8081 | Orchestration service untuk stock check, dan mulai menyiapkan persistence transaction |
 | inventory   | 8082 | Source of truth untuk medicines catalog dan stock |
 | postgres    | 55432 (host) / 5432 (container) | Database foundation untuk Phase 3, memakai 1 instance dengan database logical terpisah per service |
 
@@ -96,7 +97,7 @@ docker compose up -d postgres
 
 Catatan:
 - langkah ini diperlukan karena `Inventory Service` default-nya sudah memakai `postgres`
-- saat ini migration yang sudah tersedia baru untuk inventory
+- migration ini membuat tabel `medicines` dan `stocks`
 
 ### 3. Jalankan Inventory Service
 
@@ -115,6 +116,17 @@ Catatan:
 ```powershell
 .\scripts\run-gateway.ps1
 ```
+
+### 6. Jalankan migration transaction (untuk Phase 3 transaction persistence)
+
+```powershell
+.\scripts\migrate-transaction-up.ps1
+```
+
+Catatan:
+- langkah ini mulai relevan saat masuk modul persistence `Transaction Service`
+- migration ini membuat tabel `transactions` dan `transaction_items`
+- saat ini service transaction belum menulis data ke tabel tersebut, tetapi schema awalnya sudah disiapkan
 
 Untuk menghentikan PostgreSQL:
 
@@ -258,40 +270,3 @@ CI akan berjalan otomatis pada:
 
 - push ke branch `main`
 - setiap pull request
-
-Command yang dijalankan di CI:
-
-```bash
-go test ./... -v
-```
-
-## Implemented Best Practices
-
-- API Gateway sebagai edge service yang tipis
-- Request ID propagation menggunakan `X-Request-ID`
-- Caller service header standar menggunakan `X-Caller-Service`
-- Structured logging dengan `log/slog`
-- Graceful shutdown dan HTTP server timeouts
-- Manual dependency injection
-- Standard response envelope untuk success dan error
-- Retry ringan pada Transaction Service saat call ke Inventory
-- Circuit breaker minimal pada Transaction Service
-- Inventory persistence memakai PostgreSQL + `sqlx`
-- Unit testing handler dan proxy dengan `httptest`
-- Dokumentasi progress harian di folder `docs/`
-
-## Roadmap Berikutnya
-
-Fokus terdekat setelah cleanup ini:
-
-- migration `Transaction Service`
-- tabel `transactions` dan `transaction_items`
-- repository transaction berbasis `sqlx`
-- create transaction flow dengan DB transaction
-- idempotency key
-
-## Catatan Penting
-
-- Local development saat ini memakai **1 Postgres instance** dengan **database logical terpisah per service**. Ini adalah kompromi local dev yang tetap menjaga ownership boundary.
-- `Transaction Service` saat ini masih orchestration HTTP dan belum menyimpan transaksi ke DB.
-- Dokumentasi harian yang lebih detail ada di folder `docs/`, terutama `day18.md`, `day19.md`, `day20.md`, dan `day20add.md`.
