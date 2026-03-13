@@ -47,6 +47,21 @@ func (e UpstreamError) Error() string {
 	return fmt.Sprintf("upstream error: %s (%s)", e.Service, e.Reason)
 }
 
+type InsufficientStockError struct {
+	MedicineID   string
+	RequestedQty int
+	AvailableQty int
+}
+
+func (e InsufficientStockError) Error() string {
+	return fmt.Sprintf(
+		"insufficient stock for %s: requested=%d available=%d",
+		e.MedicineID,
+		e.RequestedQty,
+		e.AvailableQty,
+	)
+}
+
 func IsValidation(err error) (*ValidationError, bool) {
 	ve, ok := err.(*ValidationError)
 	return ve, ok
@@ -60,4 +75,9 @@ func IsNotFound(err error) (*NotFoundError, bool) {
 func IsUpstream(err error) (*UpstreamError, bool) {
 	ue, ok := err.(*UpstreamError)
 	return ue, ok
+}
+
+func IsInsufficientStock(err error) (*InsufficientStockError, bool) {
+	ie, ok := err.(*InsufficientStockError)
+	return ie, ok
 }

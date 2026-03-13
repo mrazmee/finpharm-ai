@@ -7,12 +7,26 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"finpharm-ai/services/transaction/internal/config"
 	"finpharm-ai/services/transaction/internal/httpapi"
+	"finpharm-ai/services/transaction/internal/httpapi/handler"
+	"finpharm-ai/services/transaction/internal/repository"
+	"finpharm-ai/services/transaction/internal/usecase"
 
 	"github.com/gin-gonic/gin"
 )
+
+func newStockCheckRouter(cfg config.Config) *gin.Engine {
+	httpClient := &http.Client{Timeout: 4 * time.Second}
+	breaker := repository.NewCircuitBreaker(3, 5*time.Second)
+	stockRepo := repository.NewStockHTTPRepo(cfg.InventoryBaseURL, httpClient, breaker)
+	stockUC := usecase.NewStockUsecase(stockRepo)
+	stockHandler := handler.NewStockHandler(stockUC)
+
+	return httpapi.NewRouter(cfg, stockHandler, nil)
+}
 
 func TestCheckStock_ForwardsOriginalQtyToInventory(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -38,7 +52,7 @@ func TestCheckStock_ForwardsOriginalQtyToInventory(t *testing.T) {
 	}))
 	defer inv.Close()
 
-	r := httpapi.NewRouter(config.Config{
+	r := newStockCheckRouter(config.Config{
 		AppEnv:           "local",
 		InventoryBaseURL: inv.URL,
 	})
@@ -87,7 +101,7 @@ func TestCheckStock_RetryOnceOnUpstreamError(t *testing.T) {
 	}))
 	defer inv.Close()
 
-	r := httpapi.NewRouter(config.Config{
+	r := newStockCheckRouter(config.Config{
 		AppEnv:           "local",
 		InventoryBaseURL: inv.URL,
 	})
@@ -119,7 +133,7 @@ func TestCheckStock_CircuitBreakerOpen_FailFast502(t *testing.T) {
 	}))
 	defer inv.Close()
 
-	r := httpapi.NewRouter(config.Config{
+	r := newStockCheckRouter(config.Config{
 		AppEnv:           "local",
 		InventoryBaseURL: inv.URL,
 	})

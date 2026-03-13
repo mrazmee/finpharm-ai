@@ -12,25 +12,48 @@ Posisi project saat ini:
 - **Phase 2 selesai**: clean architecture dasar, inventory service, routing gateway, request-id, logging, timeout, testing dasar, retry ringan, dan circuit breaker minimal sudah ada.
 - **Phase 3 sedang berjalan**:
   - `Inventory Service` sudah memakai **PostgreSQL + sqlx** saat dijalankan normal.
-  - migration inventory pertama sudah tersedia dan sudah dipakai untuk tabel `medicines` + `stocks`.
-  - migration awal `Transaction Service` sudah tersedia untuk tabel `transactions` + `transaction_items`.
-  - `Transaction Service` masih **belum** menyimpan transaksi ke database pada runtime; wiring repository `sqlx` dan create transaction use case akan menjadi fokus berikutnya.
+  - migration inventory pertama sudah tersedia untuk tabel `medicines` dan `stocks`.
+  - migration awal `Transaction Service` sudah tersedia untuk tabel `transactions` dan `transaction_items`.
+  - `Transaction Service` sekarang sudah bisa menyimpan transaksi ke PostgreSQL lewat endpoint `POST /v1/transactions` dengan `sqlx` dan DB transaction dasar.
+  - Gateway **belum** mem-proxy create transaction; itu akan menjadi fokus modul berikutnya.
 
 Jadi kondisi repo saat ini paling tepat dibaca sebagai:
 
-> fondasi microservices sudah stabil, inventory persistence sudah hidup, dan transaction persistence sedang mulai dibangun dari schema migration.
+> fondasi microservices sudah stabil, inventory persistence sudah hidup, dan transaction persistence dasar sudah mulai berjalan nyata.
+
+## Adjusted Roadmap Target
+
+Karena sempat ada molor di akhir Phase 2 dan awal Phase 3, target penyelesaian kita disesuaikan supaya tetap realistis.
+
+### Core portfolio target
+- **Day 41** untuk versi core tanpa RAG optional
+
+### Full project target
+- **Day 45** untuk versi full termasuk RAG optional
+
+### Snapshot sisa roadmap
+- **Day 23**: Gateway proxy `POST /v1/transactions` + end-to-end create transaction
+- **Day 24**: Pagination & filtering list transactions
+- **Day 25**: Idempotency key untuk create transaction
+- **Day 26**: Milestone 3 stabilization + docs sync
+- **Day 27 - 31**: AI Auditor Service + Gemini integration
+- **Day 32 - 35**: RAG + vector storage + citation *(optional advanced)*
+- **Day 36 - 39**: RabbitMQ + worker + reliability pattern
+- **Day 40 - 43**: JWT, metrics, audit logging, tracing mindset
+- **Day 44 - 45**: final hardening, runbook, portfolio demo readiness
 
 ## Architecture
 
 FinPharm-AI menggunakan arsitektur microservices sederhana dengan tiga service utama:
 
 - **Gateway Service** sebagai *single entry point* untuk client. Tugasnya fokus pada routing, proxy, request-id propagation, dan logging.
-- **Transaction Service** sebagai orchestration service untuk alur `stock check`. Service ini menerima request dari Gateway lalu memanggil Inventory Service.
+- **Transaction Service** sebagai orchestration service untuk alur `stock check` dan `create transaction`. Service ini menerima request, mengecek stok ke Inventory Service, lalu menyimpan transaksi ke database miliknya.
 - **Inventory Service** sebagai source of truth untuk data obat dan stok, termasuk endpoint medicines list, medicine detail, dan stock check.
 
 Alur utama saat ini:
 
 - `Client -> Gateway -> Transaction -> Inventory` untuk `POST /v1/stock/check`
+- `Client -> Transaction -> Inventory -> PostgreSQL(transaction_db)` untuk `POST /v1/transactions`
 - `Client -> Gateway -> Inventory` untuk `GET /v1/medicines`
 - `Client -> Gateway -> Inventory` untuk `GET /v1/medicines/:id`
 
@@ -58,7 +81,7 @@ finpharm-ai/
 | Service     | Port | Description |
 |-------------|------|-------------|
 | gateway     | 8080 | Edge service untuk routing, proxy, request-id propagation, dan logging |
-| transaction | 8081 | Orchestration service untuk stock check, dan mulai menyiapkan persistence transaction |
+| transaction | 8081 | Orchestration service untuk stock check dan create transaction berbasis PostgreSQL |
 | inventory   | 8082 | Source of truth untuk medicines catalog dan stock |
 | postgres    | 55432 (host) / 5432 (container) | Database foundation untuk Phase 3, memakai 1 instance dengan database logical terpisah per service |
 
@@ -99,34 +122,33 @@ Catatan:
 - langkah ini diperlukan karena `Inventory Service` default-nya sudah memakai `postgres`
 - migration ini membuat tabel `medicines` dan `stocks`
 
-### 3. Jalankan Inventory Service
-
-```powershell
-.\scripts\run-inventory.ps1
-```
-
-### 4. Jalankan Transaction Service
-
-```powershell
-.\scripts\run-transaction.ps1
-```
-
-### 5. Jalankan Gateway Service
-
-```powershell
-.\scripts\run-gateway.ps1
-```
-
-### 6. Jalankan migration transaction (untuk Phase 3 transaction persistence)
+### 3. Jalankan migration transaction
 
 ```powershell
 .\scripts\migrate-transaction-up.ps1
 ```
 
 Catatan:
-- langkah ini mulai relevan saat masuk modul persistence `Transaction Service`
 - migration ini membuat tabel `transactions` dan `transaction_items`
-- saat ini service transaction belum menulis data ke tabel tersebut, tetapi schema awalnya sudah disiapkan
+- sekarang migration ini sudah dipakai langsung oleh create transaction flow
+
+### 4. Jalankan Inventory Service
+
+```powershell
+.\scripts\run-inventory.ps1
+```
+
+### 5. Jalankan Transaction Service
+
+```powershell
+.\scripts\run-transaction.ps1
+```
+
+### 6. Jalankan Gateway Service
+
+```powershell
+.\scripts\run-gateway.ps1
+```
 
 Untuk menghentikan PostgreSQL:
 
@@ -189,6 +211,7 @@ GET  /v1/debug/sleep?ms=1000   # local/dev only
 GET  /
 GET  /health
 POST /v1/stock/check
+POST /v1/transactions
 GET  /v1/debug/sleep?ms=1000   # local/dev only
 ```
 
@@ -204,7 +227,7 @@ GET  /v1/medicines/:id
 
 ## Example Request
 
-Check stock via Gateway:
+### Check stock via Gateway
 
 ```bash
 curl -i -X POST http://localhost:8080/v1/stock/check \
@@ -226,13 +249,44 @@ Contoh response:
 }
 ```
 
-Medicines list via Gateway:
+### Create transaction via Transaction Service
+
+```bash
+curl -i -X POST http://localhost:8081/v1/transactions \
+  -H "Content-Type: application/json" \
+  -d "{\"items\":[{\"medicine_id\":\"PARA500\",\"qty\":10},{\"medicine_id\":\"AMOX500\",\"qty\":2}]}"
+```
+
+Contoh response:
+
+```json
+{
+  "data": {
+    "id": "TXN-20260312120000-AB12CD34",
+    "status": "PENDING",
+    "items": [
+      {
+        "medicine_id": "PARA500",
+        "qty": 10
+      },
+      {
+        "medicine_id": "AMOX500",
+        "qty": 2
+      }
+    ],
+    "created_at": "2026-03-12T12:00:00Z"
+  },
+  "request_id": "example-request-id"
+}
+```
+
+### Medicines list via Gateway
 
 ```bash
 curl -i "http://localhost:8080/v1/medicines?limit=2&offset=0"
 ```
 
-Medicine detail via Gateway:
+### Medicine detail via Gateway
 
 ```bash
 curl -i "http://localhost:8080/v1/medicines/PARA500"
