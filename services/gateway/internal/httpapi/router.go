@@ -25,6 +25,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		// Transaction routes
 		v1.POST("/stock/check", stockProxy.CheckStock)
 		v1.POST("/transactions", transactionProxy.CreateTransaction)
+		v1.GET("/transactions", transactionProxy.ListTransactions)
 
 		// Inventory routes
 		v1.GET("/medicines", invProxy.ListMedicines)

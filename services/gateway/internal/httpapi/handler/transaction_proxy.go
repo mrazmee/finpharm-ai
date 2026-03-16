@@ -111,3 +111,86 @@ func (h *TransactionProxyHandler) CreateTransaction(c *gin.Context) {
 
 	c.Data(resp.StatusCode, ct, respBody)
 }
+
+func (h *TransactionProxyHandler) ListTransactions(c *gin.Context) {
+	if limitStr := c.Query("limit"); limitStr != "" {
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "limit",
+				"reason": "must be an integer",
+			})
+			return
+		}
+		if limit <= 0 {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "limit",
+				"reason": "must be > 0",
+			})
+			return
+		}
+		if limit > 100 {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "limit",
+				"reason": "must be <= 100",
+			})
+			return
+		}
+	}
+
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		offset, err := strconv.Atoi(offsetStr)
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "offset",
+				"reason": "must be an integer",
+			})
+			return
+		}
+		if offset < 0 {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "offset",
+				"reason": "must be >= 0",
+			})
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	url := h.baseURL + "/v1/transactions"
+	if q := c.Request.URL.RawQuery; q != "" {
+		url += "?" + q
+	}
+
+	upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, "GATEWAY_ERROR", "failed to create upstream request", nil)
+		return
+	}
+
+	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
+	rid, _ := ridVal.(string)
+	upReq.Header.Set(middleware.HeaderRequestID, rid)
+	upReq.Header.Set("X-Caller-Service", "gateway")
+
+	resp, err := h.client.Do(upReq)
+	if err != nil {
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "transaction service unreachable", err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "failed to read upstream response", nil)
+		return
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+	c.Data(resp.StatusCode, ct, body)
+}

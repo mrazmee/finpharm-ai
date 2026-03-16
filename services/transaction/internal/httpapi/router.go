@@ -24,6 +24,7 @@ func NewRouter(cfg config.Config, stockHandler *handler.StockHandler, transactio
 		}
 		if transactionHandler != nil {
 			v1.POST("/transactions", transactionHandler.CreateTransaction)
+			v1.GET("/transactions", transactionHandler.ListTransactions)
 		}
 
 		if cfg.IsDebugEnabled() {

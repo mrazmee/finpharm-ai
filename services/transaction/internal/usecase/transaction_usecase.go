@@ -83,6 +83,41 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 	return u.repo.Create(ctx, tx)
 }
 
+func (u *TransactionUsecase) ListTransactions(ctx context.Context, req domain.ListTransactionsRequest) (domain.ListTransactionsResult, error) {
+	limit := req.Limit
+	if limit == 0 {
+		limit = 10
+	}
+	if limit < 0 {
+		return domain.ListTransactionsResult{}, &domain.ValidationError{
+			Field:  "limit",
+			Reason: "must be >= 0",
+		}
+	}
+	if limit > 100 {
+		return domain.ListTransactionsResult{}, &domain.ValidationError{
+			Field:  "limit",
+			Reason: "must be <= 100",
+		}
+	}
+
+	offset := req.Offset
+	if offset < 0 {
+		return domain.ListTransactionsResult{}, &domain.ValidationError{
+			Field:  "offset",
+			Reason: "must be >= 0",
+		}
+	}
+
+	status := strings.ToUpper(strings.TrimSpace(req.Status))
+
+	return u.repo.List(ctx, domain.ListTransactionsRequest{
+		Limit:  limit,
+		Offset: offset,
+		Status: status,
+	})
+}
+
 func generateTransactionID(now time.Time) string {
 	stamp := now.UTC().Format("20060102150405")
 	var b [4]byte
