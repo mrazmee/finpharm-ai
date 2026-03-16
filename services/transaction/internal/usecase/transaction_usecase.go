@@ -99,14 +99,41 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 		})
 	}
 
-	tx := domain.Transaction{
+	createResult, err := u.repo.Create(ctx, domain.Transaction{
 		ID:             generateTransactionID(time.Now()),
 		IdempotencyKey: idempotencyKey,
 		Status:         domain.TransactionStatusPending,
 		Items:          items,
+	})
+	if err != nil {
+		return domain.CreateTransactionResult{}, err
+	}
+	if createResult.IsReplay {
+		return createResult, nil
 	}
 
-	return u.repo.Create(ctx, tx)
+	tx := createResult.Transaction
+
+	for _, item := range tx.Items {
+		if err := u.stockRepo.DeductStock(ctx, item.MedicineID, item.Qty); err != nil {
+			_ = u.repo.UpdateStatus(ctx, tx.ID, domain.TransactionStatusFailed)
+			tx.Status = domain.TransactionStatusFailed
+			return domain.CreateTransactionResult{
+				Transaction: tx,
+				IsReplay:    false,
+			}, err
+		}
+	}
+
+	if err := u.repo.UpdateStatus(ctx, tx.ID, domain.TransactionStatusApproved); err != nil {
+		return domain.CreateTransactionResult{}, err
+	}
+
+	tx.Status = domain.TransactionStatusApproved
+	return domain.CreateTransactionResult{
+		Transaction: tx,
+		IsReplay:    false,
+	}, nil
 }
 
 func (u *TransactionUsecase) ListTransactions(ctx context.Context, req domain.ListTransactionsRequest) (domain.ListTransactionsResult, error) {

@@ -8,7 +8,9 @@ import (
 type TransactionStatus string
 
 const (
-	TransactionStatusPending TransactionStatus = "PENDING"
+	TransactionStatusPending  TransactionStatus = "PENDING"
+	TransactionStatusApproved TransactionStatus = "APPROVED"
+	TransactionStatusFailed   TransactionStatus = "FAILED"
 )
 
 type Transaction struct {
@@ -58,6 +60,7 @@ type ListTransactionsResult struct {
 
 type TransactionRepository interface {
 	Create(ctx context.Context, tx Transaction) (CreateTransactionResult, error)
+	UpdateStatus(ctx context.Context, transactionID string, status TransactionStatus) error
 	GetByIdempotencyKey(ctx context.Context, key string) (Transaction, bool, error)
 	List(ctx context.Context, req ListTransactionsRequest) (ListTransactionsResult, error)
 }

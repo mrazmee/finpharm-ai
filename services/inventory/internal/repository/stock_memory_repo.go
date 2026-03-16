@@ -29,3 +29,23 @@ func (r *StockMemoryRepo) GetAvailableQty(ctx context.Context, medicineID string
 	}
 	return qty, nil
 }
+
+func (r *StockMemoryRepo) DeductStock(ctx context.Context, medicineID string, qty int) (int, error) {
+	_ = ctx
+
+	available, ok := r.stock[medicineID]
+	if !ok {
+		return 0, &domain.NotFoundError{Resource: "medicine", Key: medicineID}
+	}
+	if available < qty {
+		return 0, &domain.InsufficientStockError{
+			MedicineID:   medicineID,
+			RequestedQty: qty,
+			AvailableQty: available,
+		}
+	}
+
+	remaining := available - qty
+	r.stock[medicineID] = remaining
+	return remaining, nil
+}

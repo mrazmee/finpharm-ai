@@ -32,6 +32,21 @@ func (e NotFoundError) Error() string {
 	return fmt.Sprintf("%s not found: %s", e.Resource, e.Key)
 }
 
+type InsufficientStockError struct {
+	MedicineID   string
+	RequestedQty int
+	AvailableQty int
+}
+
+func (e InsufficientStockError) Error() string {
+	return fmt.Sprintf(
+		"insufficient stock for %s: requested=%d available=%d",
+		e.MedicineID,
+		e.RequestedQty,
+		e.AvailableQty,
+	)
+}
+
 func IsValidation(err error) (*ValidationError, bool) {
 	ve, ok := err.(*ValidationError)
 	return ve, ok
@@ -40,4 +55,9 @@ func IsValidation(err error) (*ValidationError, bool) {
 func IsNotFound(err error) (*NotFoundError, bool) {
 	nf, ok := err.(*NotFoundError)
 	return nf, ok
+}
+
+func IsInsufficientStock(err error) (*InsufficientStockError, bool) {
+	ie, ok := err.(*InsufficientStockError)
+	return ie, ok
 }

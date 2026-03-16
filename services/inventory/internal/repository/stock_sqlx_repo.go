@@ -43,3 +43,34 @@ func (r *StockSQLXRepo) GetAvailableQty(ctx context.Context, medicineID string) 
 
 	return row.AvailableQty, nil
 }
+
+func (r *StockSQLXRepo) DeductStock(ctx context.Context, medicineID string, qty int) (int, error) {
+	const deductQuery = `
+		UPDATE stocks
+		SET available_qty = available_qty - $2
+		WHERE medicine_id = $1
+		  AND available_qty >= $2
+		RETURNING available_qty
+	`
+
+	var remaining int
+	err := r.db.GetContext(ctx, &remaining, deductQuery, medicineID, qty)
+	if err == nil {
+		return remaining, nil
+	}
+
+	if !isNoRows(err) {
+		return 0, err
+	}
+
+	available, getErr := r.GetAvailableQty(ctx, medicineID)
+	if getErr != nil {
+		return 0, getErr
+	}
+
+	return 0, &domain.InsufficientStockError{
+		MedicineID:   medicineID,
+		RequestedQty: qty,
+		AvailableQty: available,
+	}
+}

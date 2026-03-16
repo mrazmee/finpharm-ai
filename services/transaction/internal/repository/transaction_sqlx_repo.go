@@ -114,6 +114,17 @@ func (r *TransactionSQLXRepo) Create(ctx context.Context, tx domain.Transaction)
 	}, nil
 }
 
+func (r *TransactionSQLXRepo) UpdateStatus(ctx context.Context, transactionID string, status domain.TransactionStatus) error {
+	const query = `
+		UPDATE transactions
+		SET status = $2, updated_at = NOW()
+		WHERE id = $1
+	`
+
+	_, err := r.db.ExecContext(ctx, query, transactionID, string(status))
+	return err
+}
+
 func (r *TransactionSQLXRepo) GetByIdempotencyKey(ctx context.Context, key string) (domain.Transaction, bool, error) {
 	const query = `
 		SELECT id, idempotency_key, status, created_at, updated_at

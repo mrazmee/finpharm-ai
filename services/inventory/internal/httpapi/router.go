@@ -26,6 +26,7 @@ func NewRouter(
 	v1 := r.Group("/v1")
 	{
 		v1.POST("/stock/check", stockHandler.CheckStock)
+		v1.POST("/stock/deduct", stockHandler.DeductStock)
 
 		v1.GET("/medicines", medHandler.ListMedicines)
 		v1.GET("/medicines/:id", medHandler.GetMedicine)
