@@ -23,9 +23,34 @@ func NewTransactionUsecase(repo domain.TransactionRepository, stockRepo domain.S
 	}
 }
 
-func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.CreateTransactionRequest) (domain.Transaction, error) {
+func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.CreateTransactionRequest) (domain.CreateTransactionResult, error) {
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if idempotencyKey == "" {
+		return domain.CreateTransactionResult{}, &domain.ValidationError{
+			Field:  "idempotency_key",
+			Reason: "is required",
+		}
+	}
+	if len(idempotencyKey) > 100 {
+		return domain.CreateTransactionResult{}, &domain.ValidationError{
+			Field:  "idempotency_key",
+			Reason: "must be <= 100 characters",
+		}
+	}
+
+	existing, found, err := u.repo.GetByIdempotencyKey(ctx, idempotencyKey)
+	if err != nil {
+		return domain.CreateTransactionResult{}, err
+	}
+	if found {
+		return domain.CreateTransactionResult{
+			Transaction: existing,
+			IsReplay:    true,
+		}, nil
+	}
+
 	if len(req.Items) == 0 {
-		return domain.Transaction{}, &domain.ValidationError{
+		return domain.CreateTransactionResult{}, &domain.ValidationError{
 			Field:  "items",
 			Reason: "must contain at least 1 item",
 		}
@@ -37,19 +62,19 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 	for idx, item := range req.Items {
 		medicineID := strings.TrimSpace(item.MedicineID)
 		if medicineID == "" {
-			return domain.Transaction{}, &domain.ValidationError{
+			return domain.CreateTransactionResult{}, &domain.ValidationError{
 				Field:  fmt.Sprintf("items[%d].medicine_id", idx),
 				Reason: "is required",
 			}
 		}
 		if item.Qty <= 0 {
-			return domain.Transaction{}, &domain.ValidationError{
+			return domain.CreateTransactionResult{}, &domain.ValidationError{
 				Field:  fmt.Sprintf("items[%d].qty", idx),
 				Reason: "must be > 0",
 			}
 		}
 		if _, exists := seen[medicineID]; exists {
-			return domain.Transaction{}, &domain.ValidationError{
+			return domain.CreateTransactionResult{}, &domain.ValidationError{
 				Field:  "items",
 				Reason: fmt.Sprintf("duplicate medicine_id: %s", medicineID),
 			}
@@ -58,10 +83,10 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 
 		availableQty, err := u.stockRepo.GetAvailableQty(ctx, medicineID, item.Qty)
 		if err != nil {
-			return domain.Transaction{}, err
+			return domain.CreateTransactionResult{}, err
 		}
 		if availableQty < item.Qty {
-			return domain.Transaction{}, &domain.InsufficientStockError{
+			return domain.CreateTransactionResult{}, &domain.InsufficientStockError{
 				MedicineID:   medicineID,
 				RequestedQty: item.Qty,
 				AvailableQty: availableQty,
@@ -75,9 +100,10 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 	}
 
 	tx := domain.Transaction{
-		ID:     generateTransactionID(time.Now()),
-		Status: domain.TransactionStatusPending,
-		Items:  items,
+		ID:             generateTransactionID(time.Now()),
+		IdempotencyKey: idempotencyKey,
+		Status:         domain.TransactionStatusPending,
+		Items:          items,
 	}
 
 	return u.repo.Create(ctx, tx)

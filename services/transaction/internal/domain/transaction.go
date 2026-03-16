@@ -12,11 +12,12 @@ const (
 )
 
 type Transaction struct {
-	ID        string
-	Status    TransactionStatus
-	Items     []TransactionItem
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID             string
+	IdempotencyKey string
+	Status         TransactionStatus
+	Items          []TransactionItem
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type TransactionItem struct {
@@ -33,7 +34,13 @@ type TransactionItemInput struct {
 }
 
 type CreateTransactionRequest struct {
-	Items []TransactionItemInput
+	IdempotencyKey string
+	Items          []TransactionItemInput
+}
+
+type CreateTransactionResult struct {
+	Transaction Transaction
+	IsReplay    bool
 }
 
 type ListTransactionsRequest struct {
@@ -50,11 +57,12 @@ type ListTransactionsResult struct {
 }
 
 type TransactionRepository interface {
-	Create(ctx context.Context, tx Transaction) (Transaction, error)
+	Create(ctx context.Context, tx Transaction) (CreateTransactionResult, error)
+	GetByIdempotencyKey(ctx context.Context, key string) (Transaction, bool, error)
 	List(ctx context.Context, req ListTransactionsRequest) (ListTransactionsResult, error)
 }
 
 type TransactionUsecase interface {
-	CreateTransaction(ctx context.Context, req CreateTransactionRequest) (Transaction, error)
+	CreateTransaction(ctx context.Context, req CreateTransactionRequest) (CreateTransactionResult, error)
 	ListTransactions(ctx context.Context, req ListTransactionsRequest) (ListTransactionsResult, error)
 }

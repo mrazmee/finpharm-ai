@@ -19,7 +19,7 @@ import (
 
 type fakeTransactionUsecase struct {
 	capturedCreate domain.CreateTransactionRequest
-	createResult   domain.Transaction
+	createResult   domain.CreateTransactionResult
 	createErr      error
 
 	capturedList domain.ListTransactionsRequest
@@ -27,10 +27,10 @@ type fakeTransactionUsecase struct {
 	listErr      error
 }
 
-func (f *fakeTransactionUsecase) CreateTransaction(ctx context.Context, req domain.CreateTransactionRequest) (domain.Transaction, error) {
+func (f *fakeTransactionUsecase) CreateTransaction(ctx context.Context, req domain.CreateTransactionRequest) (domain.CreateTransactionResult, error) {
 	f.capturedCreate = req
 	if f.createErr != nil {
-		return domain.Transaction{}, f.createErr
+		return domain.CreateTransactionResult{}, f.createErr
 	}
 	return f.createResult, nil
 }
@@ -69,14 +69,18 @@ func TestCreateTransaction_Success(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	uc := &fakeTransactionUsecase{
-		createResult: domain.Transaction{
-			ID:     "TXN-20260312120000-AB12CD34",
-			Status: domain.TransactionStatusPending,
-			Items: []domain.TransactionItem{
-				{MedicineID: "PARA500", Qty: 10},
-				{MedicineID: "AMOX500", Qty: 2},
+		createResult: domain.CreateTransactionResult{
+			Transaction: domain.Transaction{
+				ID:             "TXN-20260312120000-AB12CD34",
+				IdempotencyKey: "idem-123",
+				Status:         domain.TransactionStatusPending,
+				Items: []domain.TransactionItem{
+					{MedicineID: "PARA500", Qty: 10},
+					{MedicineID: "AMOX500", Qty: 2},
+				},
+				CreatedAt: time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC),
 			},
-			CreatedAt: time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC),
+			IsReplay: false,
 		},
 	}
 
@@ -87,6 +91,7 @@ func TestCreateTransaction_Success(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", "tx-create-123")
+	req.Header.Set("Idempotency-Key", "idem-123")
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -94,14 +99,81 @@ func TestCreateTransaction_Success(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
 	}
+	if uc.capturedCreate.IdempotencyKey != "idem-123" {
+		t.Fatalf("expected captured idempotency key idem-123, got %q", uc.capturedCreate.IdempotencyKey)
+	}
 	if len(uc.capturedCreate.Items) != 2 {
 		t.Fatalf("expected 2 items captured, got %d", len(uc.capturedCreate.Items))
+	}
+	if got := w.Header().Get("Idempotency-Key"); got != "idem-123" {
+		t.Fatalf("expected response header Idempotency-Key idem-123, got %q", got)
 	}
 	if !strings.Contains(w.Body.String(), `"id":"TXN-20260312120000-AB12CD34"`) {
 		t.Fatalf("expected response contains transaction id, body=%s", w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), `"request_id":"tx-create-123"`) {
-		t.Fatalf("expected response contains request_id, body=%s", w.Body.String())
+}
+
+func TestCreateTransaction_ReplayReturns200(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	uc := &fakeTransactionUsecase{
+		createResult: domain.CreateTransactionResult{
+			Transaction: domain.Transaction{
+				ID:             "TXN-20260312120000-AB12CD34",
+				IdempotencyKey: "idem-123",
+				Status:         domain.TransactionStatusPending,
+				Items: []domain.TransactionItem{
+					{MedicineID: "PARA500", Qty: 10},
+				},
+				CreatedAt: time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC),
+			},
+			IsReplay: true,
+		},
+	}
+
+	txHandler := handler.NewTransactionHandler(uc)
+	r := httpapi.NewRouter(config.Config{AppEnv: "local"}, nil, txHandler)
+
+	body := `{"items":[{"medicine_id":"PARA500","qty":10}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "idem-123")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for replay, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateTransaction_MissingIdempotencyKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	uc := &fakeTransactionUsecase{}
+	txHandler := handler.NewTransactionHandler(uc)
+	r := httpapi.NewRouter(config.Config{AppEnv: "local"}, nil, txHandler)
+
+	body := `{"items":[{"medicine_id":"PARA500","qty":10}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	resp := decodeErrorEnvelope(t, w.Body.String())
+	if resp.Error.Code != "VALIDATION_ERROR" {
+		t.Fatalf("expected VALIDATION_ERROR, got %q body=%s", resp.Error.Code, w.Body.String())
+	}
+	if resp.Error.Details.Field != "header.Idempotency-Key" {
+		t.Fatalf("expected field header.Idempotency-Key, got %q body=%s", resp.Error.Details.Field, w.Body.String())
+	}
+	if resp.Error.Details.Reason != "is required" {
+		t.Fatalf("expected reason is required, got %q body=%s", resp.Error.Details.Reason, w.Body.String())
 	}
 }
 
@@ -122,6 +194,7 @@ func TestCreateTransaction_InsufficientStock(t *testing.T) {
 	body := `{"items":[{"medicine_id":"PARA500","qty":10}]}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "idem-999")
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

@@ -15,6 +15,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const headerIdempotencyKey = "Idempotency-Key"
+
 type TransactionProxyHandler struct {
 	baseURL string
 	client  *http.Client
@@ -40,6 +42,22 @@ func (h *TransactionProxyHandler) CreateTransaction(c *gin.Context) {
 	var req CreateTransactionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", err.Error())
+		return
+	}
+
+	idempotencyKey := strings.TrimSpace(c.GetHeader(headerIdempotencyKey))
+	if idempotencyKey == "" {
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+			"field":  "header.Idempotency-Key",
+			"reason": "is required",
+		})
+		return
+	}
+	if len(idempotencyKey) > 100 {
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+			"field":  "header.Idempotency-Key",
+			"reason": "must be <= 100 characters",
+		})
 		return
 	}
 
@@ -85,6 +103,7 @@ func (h *TransactionProxyHandler) CreateTransaction(c *gin.Context) {
 	}
 
 	upReq.Header.Set("Content-Type", "application/json")
+	upReq.Header.Set(headerIdempotencyKey, idempotencyKey)
 
 	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
 	rid, _ := ridVal.(string)
@@ -107,6 +126,10 @@ func (h *TransactionProxyHandler) CreateTransaction(c *gin.Context) {
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" {
 		ct = "application/json"
+	}
+
+	if gotKey := resp.Header.Get(headerIdempotencyKey); gotKey != "" {
+		c.Header(headerIdempotencyKey, gotKey)
 	}
 
 	c.Data(resp.StatusCode, ct, respBody)

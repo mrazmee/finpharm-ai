@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"finpharm-ai/services/transaction/internal/domain"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+const headerIdempotencyKey = "Idempotency-Key"
 
 type TransactionHandler struct {
 	uc domain.TransactionUsecase
@@ -55,6 +58,22 @@ func (h *TransactionHandler) CreateTransaction(c *gin.Context) {
 		return
 	}
 
+	idempotencyKey := strings.TrimSpace(c.GetHeader(headerIdempotencyKey))
+	if idempotencyKey == "" {
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+			"field":  "header.Idempotency-Key",
+			"reason": "is required",
+		})
+		return
+	}
+	if len(idempotencyKey) > 100 {
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+			"field":  "header.Idempotency-Key",
+			"reason": "must be <= 100 characters",
+		})
+		return
+	}
+
 	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
 	rid, _ := ridVal.(string)
 
@@ -68,13 +87,23 @@ func (h *TransactionHandler) CreateTransaction(c *gin.Context) {
 		})
 	}
 
-	result, err := h.uc.CreateTransaction(ctx, domain.CreateTransactionRequest{Items: items})
+	result, err := h.uc.CreateTransaction(ctx, domain.CreateTransactionRequest{
+		IdempotencyKey: idempotencyKey,
+		Items:          items,
+	})
 	if err != nil {
 		h.handleUsecaseError(c, err, "failed to create transaction")
 		return
 	}
 
-	RespondOK(c, http.StatusCreated, toTransactionResponse(result))
+	c.Header(headerIdempotencyKey, idempotencyKey)
+
+	statusCode := http.StatusCreated
+	if result.IsReplay {
+		statusCode = http.StatusOK
+	}
+
+	RespondOK(c, statusCode, toTransactionResponse(result.Transaction))
 }
 
 func (h *TransactionHandler) ListTransactions(c *gin.Context) {

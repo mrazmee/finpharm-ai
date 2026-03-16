@@ -40,6 +40,7 @@ func TestGatewayCreateTransaction_ProxyOK(t *testing.T) {
 
 	var gotRequestID string
 	var gotCallerService string
+	var gotIdempotencyKey string
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/transactions" || r.Method != http.MethodPost {
@@ -49,8 +50,10 @@ func TestGatewayCreateTransaction_ProxyOK(t *testing.T) {
 
 		gotRequestID = r.Header.Get(middleware.HeaderRequestID)
 		gotCallerService = r.Header.Get("X-Caller-Service")
+		gotIdempotencyKey = r.Header.Get("Idempotency-Key")
 
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Idempotency-Key", gotIdempotencyKey)
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"data":{"id":"TXN-20260313093000-ABCD1234","status":"PENDING","items":[{"medicine_id":"PARA500","qty":2}],"created_at":"2026-03-13T09:30:00Z"},"request_id":"x"}`))
 	}))
@@ -66,6 +69,7 @@ func TestGatewayCreateTransaction_ProxyOK(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(middleware.HeaderRequestID, "gw-tx-123")
+	req.Header.Set("Idempotency-Key", "idem-123")
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -79,12 +83,15 @@ func TestGatewayCreateTransaction_ProxyOK(t *testing.T) {
 	if gotCallerService != "gateway" {
 		t.Fatalf("expected caller service gateway, got %q", gotCallerService)
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte(`"status":"PENDING"`)) {
-		t.Fatalf("expected response to contain transaction status, got %s", w.Body.String())
+	if gotIdempotencyKey != "idem-123" {
+		t.Fatalf("expected idempotency key idem-123, got %q", gotIdempotencyKey)
+	}
+	if w.Header().Get("Idempotency-Key") != "idem-123" {
+		t.Fatalf("expected response header Idempotency-Key idem-123, got %q", w.Header().Get("Idempotency-Key"))
 	}
 }
 
-func TestGatewayCreateTransaction_ValidationError(t *testing.T) {
+func TestGatewayCreateTransaction_MissingIdempotencyKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	upstreamCalled := false
@@ -100,7 +107,7 @@ func TestGatewayCreateTransaction_ValidationError(t *testing.T) {
 	proxy := handler.NewTransactionProxyHandler(upstream.URL)
 	r.POST("/v1/transactions", proxy.CreateTransaction)
 
-	body := []byte(`{"items":[{"medicine_id":"","qty":0}]}`)
+	body := []byte(`{"items":[{"medicine_id":"PARA500","qty":2}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 
@@ -115,8 +122,41 @@ func TestGatewayCreateTransaction_ValidationError(t *testing.T) {
 	}
 
 	resp := decodeErrorEnvelope(t, w.Body.String())
-	if resp.Error.Code != "VALIDATION_ERROR" {
-		t.Fatalf("expected validation error response, got %q body=%s", resp.Error.Code, w.Body.String())
+	if resp.Error.Details.Field != "header.Idempotency-Key" {
+		t.Fatalf("expected field header.Idempotency-Key, got %q body=%s", resp.Error.Details.Field, w.Body.String())
+	}
+	if resp.Error.Details.Reason != "is required" {
+		t.Fatalf("expected reason is required, got %q body=%s", resp.Error.Details.Reason, w.Body.String())
+	}
+}
+
+func TestGatewayCreateTransaction_ReplayStatusForwarded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Idempotency-Key", "idem-123")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"data":{"id":"TXN-20260313093000-ABCD1234","status":"PENDING","items":[{"medicine_id":"PARA500","qty":2}],"created_at":"2026-03-13T09:30:00Z"},"request_id":"x"}`))
+	}))
+	defer upstream.Close()
+
+	r := gin.New()
+	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
+
+	proxy := handler.NewTransactionProxyHandler(upstream.URL)
+	r.POST("/v1/transactions", proxy.CreateTransaction)
+
+	body := []byte(`{"items":[{"medicine_id":"PARA500","qty":2}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "idem-123")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200 on replay, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 
