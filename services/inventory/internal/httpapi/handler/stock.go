@@ -110,5 +110,5 @@ func (h *StockHandler) handleStockError(c *gin.Context, err error, fallbackMessa
 		return
 	}
 
-	RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", fallbackMessage, err.Error())
+	RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", fallbackMessage, nil)
 }

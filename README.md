@@ -1,61 +1,117 @@
 # FinPharm-AI
 
-FinPharm-AI adalah project portfolio backend microservices berbasis Go yang dibuat dengan pendekatan *learn by doing*. Domain yang dipilih adalah farmasi dan transaksi agar tetap relevan dengan proses belajar backend service, sistem finansial ringan, dan integrasi AI pada tahap berikutnya.
+FinPharm-AI adalah project **portfolio backend microservices berbasis Go** yang dibangun dengan pendekatan *learning by doing*. Domain yang dipilih adalah farmasi dan transaksi agar tetap relevan dengan target role backend engineer yang menuntut kombinasi:
 
-Project ini dirancang supaya tidak hanya sekadar “jalan”, tetapi juga menunjukkan pemahaman terhadap praktik kerja industri seperti API Gateway, service boundary yang jelas, request tracing, standard response, resilience dasar, persistence per service, dan dokumentasi progres yang rapi.
+- Go / Golang
+- Microservices architecture
+- REST API
+- PostgreSQL / SQL
+- Reliability dasar
+- Idempotency
+- Orchestration antar service
+- Kesiapan untuk AI dan event-driven phase berikutnya
+
+Project ini dibangun **bertahap per hari** agar proses belajar, keputusan desain, dan progres teknis bisa dibaca dengan jelas.
+
+---
 
 ## Current Status
 
-Posisi project saat ini:
+Posisi repo saat ini:
 
-- **Phase 1 selesai**: gateway dan transaction sudah stabil untuk contract awal.
-- **Phase 2 selesai**: clean architecture dasar, inventory service, routing gateway, request-id, logging, timeout, testing dasar, retry ringan, dan circuit breaker minimal sudah ada.
-- **Phase 3 sedang berjalan**:
-  - `Inventory Service` sudah memakai **PostgreSQL + sqlx** saat dijalankan normal.
-  - migration inventory pertama sudah tersedia untuk tabel `medicines` dan `stocks`.
-  - migration awal `Transaction Service` sudah tersedia untuk tabel `transactions` dan `transaction_items`.
-  - `Transaction Service` sekarang sudah bisa menyimpan transaksi ke PostgreSQL lewat endpoint `POST /v1/transactions` dengan `sqlx` dan DB transaction dasar.
-  - Gateway **belum** mem-proxy create transaction; itu akan menjadi fokus modul berikutnya.
+- **Phase 1 selesai**
+  - Gateway + Transaction hidup
+  - Contract awal microservices stabil
+  - Health check, request-id, logging, timeout dasar
 
-Jadi kondisi repo saat ini paling tepat dibaca sebagai:
+- **Phase 2 selesai**
+  - Clean architecture dasar
+  - Inventory Service
+  - Gateway routing ke Inventory dan Transaction
+  - Retry ringan + circuit breaker minimal
+  - Testing handler dasar
 
-> fondasi microservices sudah stabil, inventory persistence sudah hidup, dan transaction persistence dasar sudah mulai berjalan nyata.
+- **Phase 3 selesai sampai Day 26**
+  - Inventory Service sudah memakai **PostgreSQL + sqlx**
+  - Transaction Service sudah menyimpan transaksi ke **PostgreSQL + sqlx**
+  - `GET /v1/transactions` tersedia lewat Gateway
+  - `POST /v1/transactions` sudah memakai **Idempotency-Key**
+  - Transaction lifecycle berjalan:
+    - `PENDING`
+    - `APPROVED`
+    - `FAILED`
+  - Create transaction sekarang juga melakukan **deduct stock**
+  - Replay dengan `Idempotency-Key` yang sama:
+    - Tidak membuat transaksi baru
+    - Tidak deduct stock lagi
 
-## Adjusted Roadmap Target
+> Fondasi microservices sudah stabil, persistence dua service domain sudah hidup, create transaction sudah idempotent, dan orchestration transaksi-ke-inventory sudah berjalan sinkron.
 
-Karena sempat ada molor di akhir Phase 2 dan awal Phase 3, target penyelesaian kita disesuaikan supaya tetap realistis.
-
-### Core portfolio target
-- **Day 41** untuk versi core tanpa RAG optional
-
-### Full project target
-- **Day 45** untuk versi full termasuk RAG optional
-
-### Snapshot sisa roadmap
-- **Day 23**: Gateway proxy `POST /v1/transactions` + end-to-end create transaction
-- **Day 24**: Pagination & filtering list transactions
-- **Day 25**: Idempotency key untuk create transaction
-- **Day 26**: Milestone 3 stabilization + docs sync
-- **Day 27 - 31**: AI Auditor Service + Gemini integration
-- **Day 32 - 35**: RAG + vector storage + citation *(optional advanced)*
-- **Day 36 - 39**: RabbitMQ + worker + reliability pattern
-- **Day 40 - 43**: JWT, metrics, audit logging, tracing mindset
-- **Day 44 - 45**: final hardening, runbook, portfolio demo readiness
+---
 
 ## Architecture
 
 FinPharm-AI menggunakan arsitektur microservices sederhana dengan tiga service utama:
 
-- **Gateway Service** sebagai *single entry point* untuk client. Tugasnya fokus pada routing, proxy, request-id propagation, dan logging.
-- **Transaction Service** sebagai orchestration service untuk alur `stock check` dan `create transaction`. Service ini menerima request, mengecek stok ke Inventory Service, lalu menyimpan transaksi ke database miliknya.
-- **Inventory Service** sebagai source of truth untuk data obat dan stok, termasuk endpoint medicines list, medicine detail, dan stock check.
+### 1. Gateway Service
 
-Alur utama saat ini:
+Single entry point untuk client.
 
-- `Client -> Gateway -> Transaction -> Inventory` untuk `POST /v1/stock/check`
-- `Client -> Transaction -> Inventory -> PostgreSQL(transaction_db)` untuk `POST /v1/transactions`
-- `Client -> Gateway -> Inventory` untuk `GET /v1/medicines`
-- `Client -> Gateway -> Inventory` untuk `GET /v1/medicines/:id`
+**Tugas:**
+
+- Routing / proxy
+- Request-id propagation
+- Edge validation dasar
+- Logging
+
+Gateway **tidak** menyimpan business logic transaksi.
+
+### 2. Transaction Service
+
+Orchestration service untuk:
+
+- Stock check
+- Create transaction
+- Idempotency
+- Lifecycle status transaction
+- Pemanggilan Inventory Service untuk deduct stock
+
+### 3. Inventory Service
+
+Source of truth untuk:
+
+- Medicines catalog
+- Stock availability
+- Stock deduction
+
+---
+
+## Main Flow
+
+### Stock Check
+
+`Client -> Gateway -> Transaction -> Inventory`
+
+### Medicines List / Detail
+
+`Client -> Gateway -> Inventory`
+
+### Create Transaction
+
+`Client -> Gateway -> Transaction -> Inventory`
+
+Flow create transaction saat ini:
+
+1. Client kirim `POST /v1/transactions` ke Gateway
+2. Gateway validasi request dasar + `Idempotency-Key`
+3. Transaction Service cek replay by `idempotency_key`
+4. Transaction Service pre-check stock ke Inventory
+5. Transaction disimpan sebagai `PENDING`
+6. Transaction Service minta Inventory deduct stock
+7. Jika sukses → transaction diupdate jadi `APPROVED`
+8. Jika gagal setelah transaction tercatat → transaction diupdate jadi `FAILED`
+
+---
 
 ## Repository Structure
 
@@ -76,14 +132,16 @@ finpharm-ai/
   README.md
 ```
 
-## Services
+### Services
 
-| Service     | Port | Description |
-|-------------|------|-------------|
-| gateway     | 8080 | Edge service untuk routing, proxy, request-id propagation, dan logging |
-| transaction | 8081 | Orchestration service untuk stock check dan create transaction berbasis PostgreSQL |
-| inventory   | 8082 | Source of truth untuk medicines catalog dan stock |
-| postgres    | 55432 (host) / 5432 (container) | Database foundation untuk Phase 3, memakai 1 instance dengan database logical terpisah per service |
+| Service     | Port                            | Description                                                                                         |
+|------------ |-------------------------------- | --------------------------------------------------------------------------------------------------- |
+| gateway     | 8080                            | Edge service untuk routing, proxy, request-id propagation, dan logging                              |
+| transaction | 8081                            | Orchestration service untuk stock check, create transaction, idempotency, dan transaction lifecycle |
+| inventory   | 8082                            | Source of truth untuk medicines catalog dan stock                                                   |
+| postgres    | 55432 (host) / 5432 (container)| Database local dev, 1 instance dengan database logical terpisah per service                         |
+
+---
 
 ## Requirements
 
@@ -91,18 +149,20 @@ finpharm-ai/
 - Docker Desktop
 - PowerShell untuk menjalankan script `.ps1`
 
-Cek versi Go:
+**Cek versi Go:**
 
 ```bash
 go version
 ```
 
-Cek Docker:
+**Cek Docker:**
 
 ```bash
 docker --version
 docker compose version
 ```
+
+---
 
 ## Running the Project
 
@@ -112,215 +172,201 @@ docker compose version
 docker compose up -d postgres
 ```
 
-### 2. Jalankan migration inventory
+### 2. Jalankan migration Inventory
 
 ```powershell
 .\scripts\migrate-inventory-up.ps1
 ```
 
-Catatan:
-- langkah ini diperlukan karena `Inventory Service` default-nya sudah memakai `postgres`
-- migration ini membuat tabel `medicines` dan `stocks`
-
-### 3. Jalankan migration transaction
+### 3. Jalankan migration Transaction
 
 ```powershell
 .\scripts\migrate-transaction-up.ps1
 ```
 
-Catatan:
-- migration ini membuat tabel `transactions` dan `transaction_items`
-- sekarang migration ini sudah dipakai langsung oleh create transaction flow
+> Migration transaction saat ini sudah mencakup:
+>
+> - tabel `transactions`
+> - tabel `transaction_items`
+> - kolom `idempotency_key`
 
-### 4. Jalankan Inventory Service
+### 4. Jalankan Services
 
 ```powershell
 .\scripts\run-inventory.ps1
-```
-
-### 5. Jalankan Transaction Service
-
-```powershell
 .\scripts\run-transaction.ps1
-```
-
-### 6. Jalankan Gateway Service
-
-```powershell
 .\scripts\run-gateway.ps1
 ```
 
-Untuk menghentikan PostgreSQL:
+**Stop PostgreSQL:**
 
 ```bash
 docker compose down
 ```
 
+---
+
 ## Environment Variables
 
 ### Common
 
-- `APP_ENV` — default `local`
+- `APP_ENV` — default: `local`
 - `PORT`
-- `READ_TIMEOUT_MS` — default `5000`
-- `WRITE_TIMEOUT_MS` — default `5000`
-- `IDLE_TIMEOUT_MS` — default `30000`
-- `SHUTDOWN_TIMEOUT_MS` — default `7000`
+- `READ_TIMEOUT_MS` — default: `5000`
+- `WRITE_TIMEOUT_MS` — default: `5000`
+- `IDLE_TIMEOUT_MS` — default: `30000`
+- `SHUTDOWN_TIMEOUT_MS` — default: `7000`
 
 ### Gateway
 
-- `TRANSACTION_BASE_URL` — default `http://localhost:8081`
-- `INVENTORY_BASE_URL` — default `http://localhost:8082`
+- `TRANSACTION_BASE_URL` — default: `http://localhost:8081`
+- `INVENTORY_BASE_URL` — default: `http://localhost:8082`
 
 ### Transaction
 
-- `INVENTORY_BASE_URL` — default `http://localhost:8082`
-- `DB_HOST` — default `127.0.0.1`
-- `DB_PORT` — default `55432`
-- `DB_USER` — default `finpharm`
-- `DB_PASSWORD` — default `finpharm`
-- `DB_NAME` — default `transaction_db`
-- `DB_SSLMODE` — default `disable`
+- `INVENTORY_BASE_URL` — default: `http://localhost:8082`
+- `DB_HOST` — default: `127.0.0.1`
+- `DB_PORT` — default: `55432`
+- `DB_USER` — default: `finpharm`
+- `DB_PASSWORD` — default: `finpharm`
+- `DB_NAME` — default: `transaction_db`
+- `DB_SSLMODE` — default: `disable`
 
 ### Inventory
 
-- `STORAGE_DRIVER` — default `postgres` dari `scripts/run-inventory.ps1`
-- `DB_HOST` — default `127.0.0.1`
-- `DB_PORT` — default `55432`
-- `DB_USER` — default `finpharm`
-- `DB_PASSWORD` — default `finpharm`
-- `DB_NAME` — default `inventory_db`
-- `DB_SSLMODE` — default `disable`
+- `STORAGE_DRIVER` — default: `postgres` (dari `scripts/run-inventory.ps1`)
+- `DB_HOST` — default: `127.0.0.1`
+- `DB_PORT` — default: `55432`
+- `DB_USER` — default: `finpharm`
+- `DB_PASSWORD` — default: `finpharm`
+- `DB_NAME` — default: `inventory_db`
+- `DB_SSLMODE` — default: `disable`
+
+---
 
 ## API Endpoints
 
 ### Gateway
 
-```text
-GET  /
-GET  /health
-POST /v1/stock/check
-GET  /v1/medicines
-GET  /v1/medicines/:id
-GET  /v1/debug/sleep?ms=1000   # local/dev only
-```
+- `GET  /`
+- `GET  /health`
+- `POST /v1/stock/check`
+- `POST /v1/transactions`
+- `GET  /v1/transactions`
+- `GET  /v1/medicines`
+- `GET  /v1/medicines/:id`
+- `GET  /v1/debug/sleep?ms=1000` — local/dev only
 
 ### Transaction
 
-```text
-GET  /
-GET  /health
-POST /v1/stock/check
-POST /v1/transactions
-GET  /v1/debug/sleep?ms=1000   # local/dev only
-```
+- `GET  /`
+- `GET  /health`
+- `POST /v1/stock/check`
+- `POST /v1/transactions`
+- `GET  /v1/transactions`
+- `GET  /v1/debug/sleep?ms=1000` — local/dev only
 
 ### Inventory
 
-```text
-GET  /
-GET  /health
-POST /v1/stock/check
-GET  /v1/medicines
-GET  /v1/medicines/:id
+- `GET  /`
+- `GET  /health`
+- `POST /v1/stock/check`
+- `POST /v1/stock/deduct`
+- `GET  /v1/medicines`
+- `GET  /v1/medicines/:id`
+
+---
+
+## Example Requests
+
+### Create Transaction via Gateway
+
+```bash
+curl -i -X POST http://localhost:8080/v1/transactions \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: idem-001" \
+  -d "{\"items\":[{\"medicine_id\":\"PARA500\",\"qty\":2},{\"medicine_id\":\"AMOX500\",\"qty\":1}]}"
 ```
 
-## Example Request
+### Replay Request Yang Sama
 
-### Check stock via Gateway
+```bash
+curl -i -X POST http://localhost:8080/v1/transactions \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: idem-001" \
+  -d "{\"items\":[{\"medicine_id\":\"PARA500\",\"qty\":2},{\"medicine_id\":\"AMOX500\",\"qty\":1}]}"
+```
+
+### List Approved Transactions
+
+```bash
+curl -i "http://localhost:8080/v1/transactions?status=approved"
+```
+
+### Check Stock
 
 ```bash
 curl -i -X POST http://localhost:8080/v1/stock/check \
   -H "Content-Type: application/json" \
-  -d "{\"medicine_id\":\"PARA500\",\"qty\":10}"
+  -d "{\"medicine_id\":\"PARA500\",\"qty\":1}"
 ```
 
-Contoh response:
-
-```json
-{
-  "data": {
-    "medicine_id": "PARA500",
-    "requested_qty": 10,
-    "available_qty": 80,
-    "is_available": true
-  },
-  "request_id": "example-request-id"
-}
-```
-
-### Create transaction via Transaction Service
-
-```bash
-curl -i -X POST http://localhost:8081/v1/transactions \
-  -H "Content-Type: application/json" \
-  -d "{\"items\":[{\"medicine_id\":\"PARA500\",\"qty\":10},{\"medicine_id\":\"AMOX500\",\"qty\":2}]}"
-```
-
-Contoh response:
-
-```json
-{
-  "data": {
-    "id": "TXN-20260312120000-AB12CD34",
-    "status": "PENDING",
-    "items": [
-      {
-        "medicine_id": "PARA500",
-        "qty": 10
-      },
-      {
-        "medicine_id": "AMOX500",
-        "qty": 2
-      }
-    ],
-    "created_at": "2026-03-12T12:00:00Z"
-  },
-  "request_id": "example-request-id"
-}
-```
-
-### Medicines list via Gateway
-
-```bash
-curl -i "http://localhost:8080/v1/medicines?limit=2&offset=0"
-```
-
-### Medicine detail via Gateway
-
-```bash
-curl -i "http://localhost:8080/v1/medicines/PARA500"
-```
+---
 
 ## Testing
 
-Jalankan semua test:
+### Jalankan semua test
 
 ```bash
-go test ./... -v
+go test ./... -count=1 -v
 ```
 
-Jalankan per service:
+### Jalankan per service
 
 ```bash
-go test ./services/gateway/... -v
-go test ./services/inventory/... -v
-go test ./services/transaction/... -v
+go test ./services/inventory/... -count=1 -v
+go test ./services/transaction/... -count=1 -v
+go test ./services/gateway/... -count=1 -v
 ```
 
-Jalankan package handler tertentu:
+---
 
-```bash
-go test ./services/gateway/internal/httpapi/handler -v
-go test ./services/inventory/internal/httpapi/handler -v
-go test ./services/transaction/internal/httpapi/handler -v
-```
+## Known Limitations
 
-## CI
+- Deduct stock multi-item masih dilakukan satu per satu
+- Jika item pertama berhasil deduct lalu item kedua gagal, transaction akan ditandai `FAILED`
+- Belum ada mekanisme kompensasi untuk item pertama
 
-Project ini menggunakan GitHub Actions melalui file `.github/workflows/ci.yml`.
+**Masa depan / improvement:**
 
-CI akan berjalan otomatis pada:
+- Batch atomic deduct di Inventory
+- Compensation
+- Saga / event-driven orchestration
 
-- push ke branch `main`
-- setiap pull request
+---
+
+## Why This Project Matters for Portfolio
+
+Project ini selaras dengan kebutuhan backend role target:
+
+- Go / Golang
+- Microservices
+- SQL / PostgreSQL
+- Distributed system mindset
+- Idempotency
+- API Gateway
+- Orchestration service
+- Reliability basics
+- Next step ke AI dan event-driven architecture
+
+---
+
+## Next Focus
+
+Setelah Milestone 3 stabil, fokus berikutnya:
+
+- AI Auditor Service
+- Gemini integration
+- Transaction review status
+- RabbitMQ / event-driven worker
+- Security & observability

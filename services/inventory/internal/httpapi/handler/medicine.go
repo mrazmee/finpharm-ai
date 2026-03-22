@@ -39,7 +39,7 @@ func (h *MedicineHandler) ListMedicines(c *gin.Context) {
 		Offset: offset,
 	})
 	if err != nil {
-		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list medicines", err.Error())
+		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list medicines", nil)
 		return
 	}
 
@@ -79,7 +79,7 @@ func (h *MedicineHandler) GetMedicine(c *gin.Context) {
 			})
 			return
 		}
-		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get medicine", err.Error())
+		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get medicine", nil)
 		return
 	}
 

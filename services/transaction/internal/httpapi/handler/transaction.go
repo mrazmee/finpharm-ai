@@ -211,7 +211,7 @@ func (h *TransactionHandler) handleUsecaseError(c *gin.Context, err error, fallb
 		return
 	}
 
-	RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", fallbackMessage, err.Error())
+	RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", fallbackMessage, nil)
 }
 
 func toTransactionResponse(tx domain.Transaction) TransactionResponse {

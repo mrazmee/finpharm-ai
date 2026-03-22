@@ -69,7 +69,7 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 			return
 		}
 
-		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", err.Error())
+		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", nil)
 		return
 	}
 
