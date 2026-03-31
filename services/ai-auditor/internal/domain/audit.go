@@ -27,6 +27,10 @@ type AuditTransactionResult struct {
 	Model     string        `json:"model"`
 }
 
+type AuditProvider interface {
+	AuditTransaction(ctx context.Context, req AuditTransactionRequest) (AuditTransactionResult, error)
+}
+
 type AuditUsecase interface {
 	AuditTransaction(ctx context.Context, req AuditTransactionRequest) (AuditTransactionResult, error)
 }

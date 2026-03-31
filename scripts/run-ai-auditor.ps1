@@ -6,8 +6,14 @@ if ([string]::IsNullOrEmpty($env:WRITE_TIMEOUT_MS)) { $env:WRITE_TIMEOUT_MS = "5
 if ([string]::IsNullOrEmpty($env:IDLE_TIMEOUT_MS)) { $env:IDLE_TIMEOUT_MS = "30000" }
 if ([string]::IsNullOrEmpty($env:SHUTDOWN_TIMEOUT_MS)) { $env:SHUTDOWN_TIMEOUT_MS = "7000" }
 
-# Day 28 scaffold: belum pakai provider AI sungguhan.
-# Env ini disiapkan dari sekarang agar Day 29 lebih mudah diintegrasikan.
-if ([string]::IsNullOrEmpty($env:GEMINI_API_KEY)) { $env:GEMINI_API_KEY = "" }
+if ([string]::IsNullOrEmpty($env:AUDIT_PROVIDER)) { $env:AUDIT_PROVIDER = "gemini" }
+if ([string]::IsNullOrEmpty($env:AUDIT_FAIL_OPEN)) { $env:AUDIT_FAIL_OPEN = "false" }
+
+if ([string]::IsNullOrEmpty($env:GEMINI_MODEL)) { $env:GEMINI_MODEL = "gemini-2.5-flash" }
+if ([string]::IsNullOrEmpty($env:GEMINI_TIMEOUT_MS)) { $env:GEMINI_TIMEOUT_MS = "3000" }
+
+# Set your key in the current shell before running, for example:
+# $env:GEMINI_API_KEY = "YOUR_REAL_KEY"
+# Do not commit real keys to the repository.
 
 go run .\services\ai-auditor\cmd\api

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,6 +15,13 @@ type Config struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
+
+	AuditProvider string
+	AuditFailOpen bool
+
+	GeminiAPIKey  string
+	GeminiModel   string
+	GeminiTimeout time.Duration
 }
 
 func Load() Config {
@@ -32,11 +40,18 @@ func Load() Config {
 		WriteTimeout:    time.Duration(writeMs) * time.Millisecond,
 		IdleTimeout:     time.Duration(idleMs) * time.Millisecond,
 		ShutdownTimeout: time.Duration(shutdownMs) * time.Millisecond,
+
+		AuditProvider: getEnv("AUDIT_PROVIDER", "gemini"),
+		AuditFailOpen: getEnvBool("AUDIT_FAIL_OPEN", false),
+
+		GeminiAPIKey:  firstNonEmpty(os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLE_API_KEY")),
+		GeminiModel:   getEnv("GEMINI_MODEL", "gemini-2.5-flash"),
+		GeminiTimeout: time.Duration(getEnvInt("GEMINI_TIMEOUT_MS", 3000)) * time.Millisecond,
 	}
 }
 
 func getEnv(key, def string) string {
-	v := os.Getenv(key)
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
@@ -44,7 +59,7 @@ func getEnv(key, def string) string {
 }
 
 func getEnvInt(key string, def int) int {
-	v := os.Getenv(key)
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
@@ -53,4 +68,28 @@ func getEnvInt(key string, def int) int {
 		return def
 	}
 	return i
+}
+
+func getEnvBool(key string, def bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return def
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }

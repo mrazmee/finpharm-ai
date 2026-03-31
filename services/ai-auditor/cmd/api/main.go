@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"finpharm-ai/services/ai-auditor/internal/config"
+	"finpharm-ai/services/ai-auditor/internal/domain"
 	"finpharm-ai/services/ai-auditor/internal/httpapi"
 	"finpharm-ai/services/ai-auditor/internal/httpapi/handler"
+	"finpharm-ai/services/ai-auditor/internal/provider"
 	"finpharm-ai/services/ai-auditor/internal/usecase"
 )
 
@@ -21,7 +24,40 @@ func main() {
 
 	cfg := config.Load()
 
-	auditUC := usecase.NewAuditUsecase()
+	var primaryProvider domain.AuditProvider
+	fallbackProvider := provider.NewSafeFallbackProvider(cfg.AuditFailOpen)
+
+	switch strings.ToLower(strings.TrimSpace(cfg.AuditProvider)) {
+	case "mock":
+		primaryProvider = provider.NewRuleBasedProvider()
+		slog.Info("audit_provider_selected",
+			"provider", "mock",
+			"model", "rule-based-v1",
+		)
+	case "", "gemini":
+		if strings.TrimSpace(cfg.GeminiAPIKey) == "" {
+			slog.Warn("audit_provider_fallback_startup",
+				"reason", "gemini api key missing",
+				"provider", "fallback",
+				"model", "safe-review-v1",
+			)
+		} else {
+			primaryProvider = provider.NewGeminiProvider(cfg.GeminiAPIKey, cfg.GeminiModel, cfg.GeminiTimeout)
+			slog.Info("audit_provider_selected",
+				"provider", "gemini",
+				"model", cfg.GeminiModel,
+				"timeout_ms", int(cfg.GeminiTimeout.Milliseconds()),
+			)
+		}
+	default:
+		slog.Warn("audit_provider_unknown",
+			"configured_provider", cfg.AuditProvider,
+			"provider", "fallback",
+			"model", "safe-review-v1",
+		)
+	}
+
+	auditUC := usecase.NewAuditUsecase(primaryProvider, fallbackProvider)
 	auditHandler := handler.NewAuditHandler(auditUC)
 	router := httpapi.NewRouter(cfg, auditHandler)
 
