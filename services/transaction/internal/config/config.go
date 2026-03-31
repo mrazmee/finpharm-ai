@@ -2,9 +2,9 @@ package config
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -12,7 +12,14 @@ type Config struct {
 	AppEnv string
 	Port   string
 
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
+
 	InventoryBaseURL string
+	AIAuditorBaseURL string
+	AIAuditorTimeout time.Duration
 
 	DBHost     string
 	DBPort     string
@@ -20,62 +27,57 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	DBSSLMode  string
-
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	ShutdownTimeout time.Duration
 }
 
 func Load() Config {
-	appEnv := getEnv("APP_ENV", "local")
-	port := getEnv("PORT", "8081")
-
-	invURL := getEnv("INVENTORY_BASE_URL", "http://localhost:8082")
-
-	dbHost := getEnv("DB_HOST", "127.0.0.1")
-	dbPort := getEnv("DB_PORT", "55432")
-	dbUser := getEnv("DB_USER", "finpharm")
-	dbPassword := getEnv("DB_PASSWORD", "finpharm")
-	dbName := getEnv("DB_NAME", "transaction_db")
-	dbSSLMode := getEnv("DB_SSLMODE", "disable")
-
 	readMs := getEnvInt("READ_TIMEOUT_MS", 5000)
 	writeMs := getEnvInt("WRITE_TIMEOUT_MS", 5000)
 	idleMs := getEnvInt("IDLE_TIMEOUT_MS", 30000)
 	shutdownMs := getEnvInt("SHUTDOWN_TIMEOUT_MS", 7000)
+	aiAuditorTimeoutMs := getEnvInt("AI_AUDITOR_TIMEOUT_MS", 5000)
 
 	return Config{
-		AppEnv:           appEnv,
-		Port:             port,
-		InventoryBaseURL: invURL,
-		DBHost:           dbHost,
-		DBPort:           dbPort,
-		DBUser:           dbUser,
-		DBPassword:       dbPassword,
-		DBName:           dbName,
-		DBSSLMode:        dbSSLMode,
-		ReadTimeout:      time.Duration(readMs) * time.Millisecond,
-		WriteTimeout:     time.Duration(writeMs) * time.Millisecond,
-		IdleTimeout:      time.Duration(idleMs) * time.Millisecond,
-		ShutdownTimeout:  time.Duration(shutdownMs) * time.Millisecond,
+		AppEnv: getEnv("APP_ENV", "local"),
+		Port:   getEnv("PORT", "8081"),
+
+		ReadTimeout:     time.Duration(readMs) * time.Millisecond,
+		WriteTimeout:    time.Duration(writeMs) * time.Millisecond,
+		IdleTimeout:     time.Duration(idleMs) * time.Millisecond,
+		ShutdownTimeout: time.Duration(shutdownMs) * time.Millisecond,
+
+		InventoryBaseURL: getEnv("INVENTORY_BASE_URL", "http://localhost:8082"),
+		AIAuditorBaseURL: getEnv("AI_AUDITOR_BASE_URL", "http://localhost:8083"),
+		AIAuditorTimeout: time.Duration(aiAuditorTimeoutMs) * time.Millisecond,
+
+		DBHost:     getEnv("DB_HOST", "127.0.0.1"),
+		DBPort:     getEnv("DB_PORT", "55432"),
+		DBUser:     getEnv("DB_USER", "finpharm"),
+		DBPassword: getEnv("DB_PASSWORD", "finpharm"),
+		DBName:     getEnv("DB_NAME", "transaction_db"),
+		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
 	}
 }
 
-func (c Config) IsDebugEnabled() bool {
-	return c.AppEnv == "local" || c.AppEnv == "dev"
-}
-
-func (c Config) DBConnString() string {
+func (c Config) DSN() string {
 	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
-		url.QueryEscape(c.DBUser),
-		url.QueryEscape(c.DBPassword),
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
 		c.DBHost,
 		c.DBPort,
+		c.DBUser,
+		c.DBPassword,
 		c.DBName,
-		url.QueryEscape(c.DBSSLMode),
+		c.DBSSLMode,
 	)
+}
+
+func (c Config) IsDebugEnabled() bool {
+	env := strings.ToLower(strings.TrimSpace(c.AppEnv))
+	switch env {
+	case "local", "dev", "development":
+		return true
+	default:
+		return false
+	}
 }
 
 func getEnv(key, def string) string {

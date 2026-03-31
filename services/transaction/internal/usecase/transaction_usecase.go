@@ -14,12 +14,18 @@ import (
 type TransactionUsecase struct {
 	repo      domain.TransactionRepository
 	stockRepo domain.StockRepository
+	auditRepo domain.AIAuditorRepository
 }
 
-func NewTransactionUsecase(repo domain.TransactionRepository, stockRepo domain.StockRepository) *TransactionUsecase {
+func NewTransactionUsecase(
+	repo domain.TransactionRepository,
+	stockRepo domain.StockRepository,
+	auditRepo domain.AIAuditorRepository,
+) *TransactionUsecase {
 	return &TransactionUsecase{
 		repo:      repo,
 		stockRepo: stockRepo,
+		auditRepo: auditRepo,
 	}
 }
 
@@ -114,9 +120,44 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 
 	tx := createResult.Transaction
 
+	if u.auditRepo == nil {
+		return domain.CreateTransactionResult{
+			Transaction: tx,
+			IsReplay:    false,
+		}, nil
+	}
+
+	auditItems := make([]domain.AuditTransactionItem, 0, len(tx.Items))
+	for _, item := range tx.Items {
+		auditItems = append(auditItems, domain.AuditTransactionItem{
+			MedicineID: item.MedicineID,
+			Qty:        item.Qty,
+		})
+	}
+
+	auditResult, err := u.auditRepo.AuditTransaction(ctx, domain.AuditTransactionRequest{
+		TransactionID: tx.ID,
+		Items:         auditItems,
+	})
+	if err != nil {
+		return domain.CreateTransactionResult{
+			Transaction: tx,
+			IsReplay:    false,
+		}, nil
+	}
+
+	if auditResult.Decision == domain.AuditDecisionReview {
+		return domain.CreateTransactionResult{
+			Transaction: tx,
+			IsReplay:    false,
+		}, nil
+	}
+
 	for _, item := range tx.Items {
 		if err := u.stockRepo.DeductStock(ctx, item.MedicineID, item.Qty); err != nil {
-			_ = u.repo.UpdateStatus(ctx, tx.ID, domain.TransactionStatusFailed)
+			if updateErr := u.repo.UpdateStatus(ctx, tx.ID, domain.TransactionStatusFailed); updateErr != nil {
+				return domain.CreateTransactionResult{}, updateErr
+			}
 			tx.Status = domain.TransactionStatusFailed
 			return domain.CreateTransactionResult{
 				Transaction: tx,

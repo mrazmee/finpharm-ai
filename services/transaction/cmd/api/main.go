@@ -14,6 +14,9 @@ import (
 	"finpharm-ai/services/transaction/internal/httpapi/handler"
 	"finpharm-ai/services/transaction/internal/repository"
 	"finpharm-ai/services/transaction/internal/usecase"
+
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -23,35 +26,33 @@ func main() {
 
 	cfg := config.Load()
 
-	httpClient := &http.Client{Timeout: 4 * time.Second}
-	breaker := repository.NewCircuitBreaker(3, 5*time.Second)
-	stockRepo := repository.NewStockHTTPRepo(cfg.InventoryBaseURL, httpClient, breaker)
-	stockUC := usecase.NewStockUsecase(stockRepo)
-	stockHandler := handler.NewStockHandler(stockUC)
-
-	db, err := repository.OpenPostgres(cfg.DBConnString())
+	db, err := sqlx.Connect("postgres", cfg.DSN())
 	if err != nil {
-		slog.Error("db_connect_error", "error", err, "db_name", cfg.DBName)
+		slog.Error("db_connect_error", "error", err)
 		os.Exit(1)
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			slog.Error("resource_cleanup_error", "error", err)
-		}
-	}()
+	defer db.Close()
 
-	slog.Info("transaction_persistence_selected",
-		"driver", "postgres",
-		"db_name", cfg.DBName,
-		"db_host", cfg.DBHost,
-		"db_port", cfg.DBPort,
-	)
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
 
-	transactionRepo := repository.NewTransactionSQLXRepo(db)
-	transactionUC := usecase.NewTransactionUsecase(transactionRepo, stockRepo)
-	transactionHandler := handler.NewTransactionHandler(transactionUC)
+	txRepo := repository.NewTransactionSQLXRepo(db)
 
-	router := httpapi.NewRouter(cfg, stockHandler, transactionHandler)
+	stockHTTPClient := &http.Client{Timeout: 4 * time.Second}
+	stockBreaker := repository.NewCircuitBreaker(3, 5*time.Second)
+	stockRepo := repository.NewStockHTTPRepo(cfg.InventoryBaseURL, stockHTTPClient, stockBreaker)
+
+	aiAuditorClient := &http.Client{Timeout: cfg.AIAuditorTimeout + time.Second}
+	aiAuditorRepo := repository.NewAIAuditorHTTPRepo(cfg.AIAuditorBaseURL, aiAuditorClient, cfg.AIAuditorTimeout)
+
+	stockUC := usecase.NewStockUsecase(stockRepo)
+	txUC := usecase.NewTransactionUsecase(txRepo, stockRepo, aiAuditorRepo)
+
+	stockHandler := handler.NewStockHandler(stockUC)
+	txHandler := handler.NewTransactionHandler(txUC)
+
+	router := httpapi.NewRouter(cfg, stockHandler, txHandler)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -64,6 +65,9 @@ func main() {
 	go func() {
 		slog.Info("server_start",
 			"port", cfg.Port,
+			"inventory_base_url", cfg.InventoryBaseURL,
+			"ai_auditor_base_url", cfg.AIAuditorBaseURL,
+			"ai_auditor_timeout_ms", int(cfg.AIAuditorTimeout.Milliseconds()),
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

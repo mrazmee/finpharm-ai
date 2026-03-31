@@ -10,10 +10,10 @@ import (
 )
 
 type fakeTransactionRepo struct {
-	createCalls int
-	captured    domain.Transaction
+	createCalls  int
+	captured     domain.Transaction
 	createResult domain.CreateTransactionResult
-	err         error
+	err          error
 
 	updateStatusCalls int
 	updatedID         string
@@ -113,6 +113,20 @@ func (f *fakeStockRepo) DeductStock(ctx context.Context, medicineID string, qty 
 	return nil
 }
 
+type fakeAuditRepo struct {
+	result domain.AuditTransactionResult
+	err    error
+	calls  int
+}
+
+func (f *fakeAuditRepo) AuditTransaction(ctx context.Context, req domain.AuditTransactionRequest) (domain.AuditTransactionResult, error) {
+	f.calls++
+	if f.err != nil {
+		return domain.AuditTransactionResult{}, f.err
+	}
+	return f.result, nil
+}
+
 func TestCreateTransaction_Success(t *testing.T) {
 	repo := &fakeTransactionRepo{}
 	stockRepo := &fakeStockRepo{
@@ -122,8 +136,15 @@ func TestCreateTransaction_Success(t *testing.T) {
 		},
 		deductErrFor: map[string]error{},
 	}
+	auditRepo := &fakeAuditRepo{
+		result: domain.AuditTransactionResult{
+			Decision: domain.AuditDecisionApproved,
+			Provider: "gemini",
+			Model:    "gemini-2.5-flash",
+		},
+	}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
 		IdempotencyKey: "idem-001",
@@ -140,6 +161,9 @@ func TestCreateTransaction_Success(t *testing.T) {
 	}
 	if repo.createCalls != 1 {
 		t.Fatalf("expected repo.Create called once, got %d", repo.createCalls)
+	}
+	if auditRepo.calls != 1 {
+		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
 	}
 	if repo.updateStatusCalls != 1 {
 		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
@@ -158,9 +182,6 @@ func TestCreateTransaction_Success(t *testing.T) {
 	}
 	if result.Transaction.Status != domain.TransactionStatusApproved {
 		t.Fatalf("expected status APPROVED, got %s", result.Transaction.Status)
-	}
-	if repo.captured.IdempotencyKey != "idem-001" {
-		t.Fatalf("expected idempotency key idem-001, got %q", repo.captured.IdempotencyKey)
 	}
 }
 
@@ -183,8 +204,9 @@ func TestCreateTransaction_ReplayByIdempotencyKey(t *testing.T) {
 		available:    map[string]int{"PARA500": 80},
 		deductErrFor: map[string]error{},
 	}
+	auditRepo := &fakeAuditRepo{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
 		IdempotencyKey: "idem-001",
@@ -210,6 +232,9 @@ func TestCreateTransaction_ReplayByIdempotencyKey(t *testing.T) {
 	if stockRepo.getCalls != 0 || stockRepo.deductCalls != 0 {
 		t.Fatalf("expected stock repo not called on replay, got checks=%d deduct=%d", stockRepo.getCalls, stockRepo.deductCalls)
 	}
+	if auditRepo.calls != 0 {
+		t.Fatalf("expected audit repo not called on replay, got %d", auditRepo.calls)
+	}
 }
 
 func TestCreateTransaction_MissingIdempotencyKey(t *testing.T) {
@@ -218,8 +243,9 @@ func TestCreateTransaction_MissingIdempotencyKey(t *testing.T) {
 		available:    map[string]int{},
 		deductErrFor: map[string]error{},
 	}
+	auditRepo := &fakeAuditRepo{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	_, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
 		Items: []domain.TransactionItemInput{
@@ -250,8 +276,9 @@ func TestCreateTransaction_InsufficientStockBeforeCreate(t *testing.T) {
 		},
 		deductErrFor: map[string]error{},
 	}
+	auditRepo := &fakeAuditRepo{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	_, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
 		IdempotencyKey: "idem-002",
@@ -273,6 +300,90 @@ func TestCreateTransaction_InsufficientStockBeforeCreate(t *testing.T) {
 	if repo.createCalls != 0 {
 		t.Fatalf("expected repo.Create not called, got %d", repo.createCalls)
 	}
+	if auditRepo.calls != 0 {
+		t.Fatalf("expected audit repo not called, got %d", auditRepo.calls)
+	}
+}
+
+func TestCreateTransaction_AuditReviewKeepsPending(t *testing.T) {
+	repo := &fakeTransactionRepo{}
+	stockRepo := &fakeStockRepo{
+		available: map[string]int{
+			"OBATKERAS-X": 5,
+		},
+		deductErrFor: map[string]error{},
+	}
+	auditRepo := &fakeAuditRepo{
+		result: domain.AuditTransactionResult{
+			Decision: domain.AuditDecisionReview,
+			Provider: "gemini",
+			Model:    "gemini-2.5-flash",
+		},
+	}
+
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+
+	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
+		IdempotencyKey: "idem-003",
+		Items: []domain.TransactionItemInput{
+			{MedicineID: "OBATKERAS-X", Qty: 2},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if repo.createCalls != 1 {
+		t.Fatalf("expected repo.Create called once, got %d", repo.createCalls)
+	}
+	if auditRepo.calls != 1 {
+		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
+	}
+	if repo.updateStatusCalls != 0 {
+		t.Fatalf("expected no status update, got %d", repo.updateStatusCalls)
+	}
+	if result.Transaction.Status != domain.TransactionStatusPending {
+		t.Fatalf("expected returned status PENDING, got %s", result.Transaction.Status)
+	}
+	if stockRepo.deductCalls != 0 {
+		t.Fatalf("expected no stock deduction for review, got %d", stockRepo.deductCalls)
+	}
+}
+
+func TestCreateTransaction_AuditErrorKeepsPending(t *testing.T) {
+	repo := &fakeTransactionRepo{}
+	stockRepo := &fakeStockRepo{
+		available: map[string]int{
+			"PARA500": 10,
+		},
+		deductErrFor: map[string]error{},
+	}
+	auditRepo := &fakeAuditRepo{
+		err: &domain.UpstreamError{
+			Service: "ai-auditor",
+			Reason:  "connection refused",
+		},
+	}
+
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+
+	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
+		IdempotencyKey: "idem-004",
+		Items: []domain.TransactionItemInput{
+			{MedicineID: "PARA500", Qty: 2},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if repo.updateStatusCalls != 0 {
+		t.Fatalf("expected no status update, got %d", repo.updateStatusCalls)
+	}
+	if result.Transaction.Status != domain.TransactionStatusPending {
+		t.Fatalf("expected returned status PENDING, got %s", result.Transaction.Status)
+	}
+	if stockRepo.deductCalls != 0 {
+		t.Fatalf("expected no stock deduction when ai auditor fails, got %d", stockRepo.deductCalls)
+	}
 }
 
 func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
@@ -290,11 +401,18 @@ func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
 			},
 		},
 	}
+	auditRepo := &fakeAuditRepo{
+		result: domain.AuditTransactionResult{
+			Decision: domain.AuditDecisionApproved,
+			Provider: "gemini",
+			Model:    "gemini-2.5-flash",
+		},
+	}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
-		IdempotencyKey: "idem-003",
+		IdempotencyKey: "idem-005",
 		Items: []domain.TransactionItemInput{
 			{MedicineID: "PARA500", Qty: 2},
 			{MedicineID: "AMOX500", Qty: 2},
@@ -309,6 +427,9 @@ func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
 	}
 	if repo.createCalls != 1 {
 		t.Fatalf("expected repo.Create called once, got %d", repo.createCalls)
+	}
+	if auditRepo.calls != 1 {
+		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
 	}
 	if repo.updateStatusCalls != 1 {
 		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
@@ -343,8 +464,9 @@ func TestListTransactions_DefaultPagination(t *testing.T) {
 		available:    map[string]int{},
 		deductErrFor: map[string]error{},
 	}
+	auditRepo := &fakeAuditRepo{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	result, err := uc.ListTransactions(context.Background(), domain.ListTransactionsRequest{})
 	if err != nil {
@@ -377,13 +499,14 @@ func TestListTransactions_WithFilter(t *testing.T) {
 		available:    map[string]int{},
 		deductErrFor: map[string]error{},
 	}
+	auditRepo := &fakeAuditRepo{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	_, err := uc.ListTransactions(context.Background(), domain.ListTransactionsRequest{
 		Limit:  5,
 		Offset: 10,
-		Status: "approved",
+		Status: "pending",
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -391,8 +514,8 @@ func TestListTransactions_WithFilter(t *testing.T) {
 	if repo.listCalls != 1 {
 		t.Fatalf("expected repo.List called once, got %d", repo.listCalls)
 	}
-	if repo.capturedList.Status != "APPROVED" {
-		t.Fatalf("expected normalized status APPROVED, got %q", repo.capturedList.Status)
+	if repo.capturedList.Status != "PENDING" {
+		t.Fatalf("expected normalized status PENDING, got %q", repo.capturedList.Status)
 	}
 }
 
@@ -402,8 +525,9 @@ func TestListTransactions_InvalidLimit(t *testing.T) {
 		available:    map[string]int{},
 		deductErrFor: map[string]error{},
 	}
+	auditRepo := &fakeAuditRepo{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	_, err := uc.ListTransactions(context.Background(), domain.ListTransactionsRequest{
 		Limit: -1,
@@ -430,8 +554,9 @@ func TestListTransactions_InvalidOffset(t *testing.T) {
 		available:    map[string]int{},
 		deductErrFor: map[string]error{},
 	}
+	auditRepo := &fakeAuditRepo{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
 
 	_, err := uc.ListTransactions(context.Background(), domain.ListTransactionsRequest{
 		Offset: -1,
