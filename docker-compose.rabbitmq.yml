@@ -1,0 +1,28 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: finpharm-rabbitmq
+    hostname: finpharm-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: finpharm
+      RABBITMQ_DEFAULT_PASS: finpharm
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - finpharm-infra
+
+volumes:
+  rabbitmq_data:
+
+networks:
+  finpharm-infra:
+    name: finpharm-infra
