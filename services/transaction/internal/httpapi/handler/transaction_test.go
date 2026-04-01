@@ -74,14 +74,14 @@ func TestCreateTransaction_Success(t *testing.T) {
 	uc := &fakeTransactionUsecase{
 		createResult: domain.CreateTransactionResult{
 			Transaction: domain.Transaction{
-				ID:             "TXN-20260316120000-AB12CD34",
+				ID:             "TXN-20260331120000-AB12CD34",
 				IdempotencyKey: "idem-123",
 				Status:         domain.TransactionStatusApproved,
 				Items: []domain.TransactionItem{
 					{MedicineID: "PARA500", Qty: 10},
 					{MedicineID: "AMOX500", Qty: 2},
 				},
-				CreatedAt: time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC),
+				CreatedAt: time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC),
 			},
 			IsReplay: false,
 		},
@@ -113,19 +113,93 @@ func TestCreateTransaction_Success(t *testing.T) {
 	}
 }
 
+func TestCreateTransaction_PendingReviewStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	uc := &fakeTransactionUsecase{
+		createResult: domain.CreateTransactionResult{
+			Transaction: domain.Transaction{
+				ID:             "TXN-20260331121000-AB12CD34",
+				IdempotencyKey: "idem-124",
+				Status:         domain.TransactionStatusPendingReview,
+				Items: []domain.TransactionItem{
+					{MedicineID: "PARA500", Qty: 2},
+				},
+				CreatedAt: time.Date(2026, 3, 31, 12, 10, 0, 0, time.UTC),
+			},
+			IsReplay: false,
+		},
+	}
+
+	txHandler := handler.NewTransactionHandler(uc)
+	r := httpapi.NewRouter(config.Config{AppEnv: "local"}, nil, txHandler)
+
+	body := `{"items":[{"medicine_id":"PARA500","qty":2}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "idem-124")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"status":"PENDING_REVIEW"`) {
+		t.Fatalf("expected status PENDING_REVIEW, body=%s", w.Body.String())
+	}
+}
+
+func TestCreateTransaction_FlaggedStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	uc := &fakeTransactionUsecase{
+		createResult: domain.CreateTransactionResult{
+			Transaction: domain.Transaction{
+				ID:             "TXN-20260331122000-AB12CD34",
+				IdempotencyKey: "idem-125",
+				Status:         domain.TransactionStatusFlagged,
+				Items: []domain.TransactionItem{
+					{MedicineID: "OBATKERAS-X", Qty: 2},
+				},
+				CreatedAt: time.Date(2026, 3, 31, 12, 20, 0, 0, time.UTC),
+			},
+			IsReplay: false,
+		},
+	}
+
+	txHandler := handler.NewTransactionHandler(uc)
+	r := httpapi.NewRouter(config.Config{AppEnv: "local"}, nil, txHandler)
+
+	body := `{"items":[{"medicine_id":"OBATKERAS-X","qty":2}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/transactions", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "idem-125")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"status":"FLAGGED"`) {
+		t.Fatalf("expected status FLAGGED, body=%s", w.Body.String())
+	}
+}
+
 func TestCreateTransaction_ReplayReturns200(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	uc := &fakeTransactionUsecase{
 		createResult: domain.CreateTransactionResult{
 			Transaction: domain.Transaction{
-				ID:             "TXN-20260316120000-AB12CD34",
+				ID:             "TXN-20260331120000-AB12CD34",
 				IdempotencyKey: "idem-123",
 				Status:         domain.TransactionStatusApproved,
 				Items: []domain.TransactionItem{
 					{MedicineID: "PARA500", Qty: 10},
 				},
-				CreatedAt: time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC),
+				CreatedAt: time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC),
 			},
 			IsReplay: true,
 		},
@@ -216,12 +290,12 @@ func TestListTransactions_DefaultPagination(t *testing.T) {
 		listResult: domain.ListTransactionsResult{
 			Items: []domain.Transaction{
 				{
-					ID:     "TXN-20260316093000-AAAA1111",
+					ID:     "TXN-20260331093000-AAAA1111",
 					Status: domain.TransactionStatusApproved,
 					Items: []domain.TransactionItem{
 						{MedicineID: "PARA500", Qty: 2},
 					},
-					CreatedAt: time.Date(2026, 3, 16, 9, 30, 0, 0, time.UTC),
+					CreatedAt: time.Date(2026, 3, 31, 9, 30, 0, 0, time.UTC),
 				},
 			},
 			Limit:  10,
@@ -260,15 +334,15 @@ func TestListTransactions_WithQueryParams(t *testing.T) {
 	txHandler := handler.NewTransactionHandler(uc)
 	r := httpapi.NewRouter(config.Config{AppEnv: "local"}, nil, txHandler)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/transactions?limit=5&offset=10&status=approved", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/transactions?limit=5&offset=10&status=pending_review", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
-	if uc.capturedList.Status != "approved" {
-		t.Fatalf("expected raw captured status approved, got %q", uc.capturedList.Status)
+	if uc.capturedList.Status != "pending_review" {
+		t.Fatalf("expected raw captured status pending_review, got %q", uc.capturedList.Status)
 	}
 }
 

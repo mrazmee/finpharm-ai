@@ -11,6 +11,8 @@ import (
 	"finpharm-ai/services/transaction/internal/domain"
 )
 
+const flaggedRiskThreshold = 0.85
+
 type TransactionUsecase struct {
 	repo      domain.TransactionRepository
 	stockRepo domain.StockRepository
@@ -121,10 +123,7 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 	tx := createResult.Transaction
 
 	if u.auditRepo == nil {
-		return domain.CreateTransactionResult{
-			Transaction: tx,
-			IsReplay:    false,
-		}, nil
+		return u.markReviewStatus(ctx, tx, domain.TransactionStatusPendingReview)
 	}
 
 	auditItems := make([]domain.AuditTransactionItem, 0, len(tx.Items))
@@ -140,17 +139,15 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 		Items:         auditItems,
 	})
 	if err != nil {
-		return domain.CreateTransactionResult{
-			Transaction: tx,
-			IsReplay:    false,
-		}, nil
+		return u.markReviewStatus(ctx, tx, domain.TransactionStatusPendingReview)
 	}
 
 	if auditResult.Decision == domain.AuditDecisionReview {
-		return domain.CreateTransactionResult{
-			Transaction: tx,
-			IsReplay:    false,
-		}, nil
+		status := domain.TransactionStatusPendingReview
+		if auditResult.RiskScore >= flaggedRiskThreshold {
+			status = domain.TransactionStatusFlagged
+		}
+		return u.markReviewStatus(ctx, tx, status)
 	}
 
 	for _, item := range tx.Items {
@@ -171,6 +168,17 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 	}
 
 	tx.Status = domain.TransactionStatusApproved
+	return domain.CreateTransactionResult{
+		Transaction: tx,
+		IsReplay:    false,
+	}, nil
+}
+
+func (u *TransactionUsecase) markReviewStatus(ctx context.Context, tx domain.Transaction, status domain.TransactionStatus) (domain.CreateTransactionResult, error) {
+	if err := u.repo.UpdateStatus(ctx, tx.ID, status); err != nil {
+		return domain.CreateTransactionResult{}, err
+	}
+	tx.Status = status
 	return domain.CreateTransactionResult{
 		Transaction: tx,
 		IsReplay:    false,
