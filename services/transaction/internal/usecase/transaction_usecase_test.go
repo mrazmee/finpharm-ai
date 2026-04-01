@@ -20,6 +20,11 @@ type fakeTransactionRepo struct {
 	updatedStatus     domain.TransactionStatus
 	updateErr         error
 
+	updateAuditCalls int
+	auditedID        string
+	auditValue       domain.TransactionAudit
+	updateAuditErr   error
+
 	getByKeyCalls int
 	capturedKey   string
 	existing      domain.Transaction
@@ -42,7 +47,7 @@ func (f *fakeTransactionRepo) Create(ctx context.Context, tx domain.Transaction)
 		return f.createResult, nil
 	}
 
-	tx.CreatedAt = time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC)
+	tx.CreatedAt = time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
 	tx.UpdatedAt = tx.CreatedAt
 	return domain.CreateTransactionResult{
 		Transaction: tx,
@@ -55,6 +60,13 @@ func (f *fakeTransactionRepo) UpdateStatus(ctx context.Context, transactionID st
 	f.updatedID = transactionID
 	f.updatedStatus = status
 	return f.updateErr
+}
+
+func (f *fakeTransactionRepo) UpdateAudit(ctx context.Context, transactionID string, audit domain.TransactionAudit) error {
+	f.updateAuditCalls++
+	f.auditedID = transactionID
+	f.auditValue = audit
+	return f.updateAuditErr
 }
 
 func (f *fakeTransactionRepo) GetByIdempotencyKey(ctx context.Context, key string) (domain.Transaction, bool, error) {
@@ -138,9 +150,11 @@ func TestCreateTransaction_Success(t *testing.T) {
 	}
 	auditRepo := &fakeAuditRepo{
 		result: domain.AuditTransactionResult{
-			Decision: domain.AuditDecisionApproved,
-			Provider: "gemini",
-			Model:    "gemini-2.5-flash",
+			Decision:  domain.AuditDecisionApproved,
+			RiskScore: 0.05,
+			Reason:    "safe transaction",
+			Provider:  "gemini",
+			Model:     "gemini-2.5-flash",
 		},
 	}
 
@@ -165,6 +179,12 @@ func TestCreateTransaction_Success(t *testing.T) {
 	if auditRepo.calls != 1 {
 		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
 	}
+	if repo.updateAuditCalls != 1 {
+		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
+	}
+	if repo.auditValue.Provider != "gemini" {
+		t.Fatalf("expected audit provider gemini, got %q", repo.auditValue.Provider)
+	}
 	if repo.updateStatusCalls != 1 {
 		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
 	}
@@ -183,17 +203,28 @@ func TestCreateTransaction_Success(t *testing.T) {
 	if result.Transaction.Status != domain.TransactionStatusApproved {
 		t.Fatalf("expected status APPROVED, got %s", result.Transaction.Status)
 	}
+	if result.Transaction.Audit == nil {
+		t.Fatal("expected audit metadata on approved transaction")
+	}
 }
 
 func TestCreateTransaction_ReplayByIdempotencyKey(t *testing.T) {
 	existing := domain.Transaction{
-		ID:             "TXN-20260331100000-AAAA1111",
+		ID:             "TXN-20260401100000-AAAA1111",
 		IdempotencyKey: "idem-001",
 		Status:         domain.TransactionStatusApproved,
 		Items: []domain.TransactionItem{
 			{MedicineID: "PARA500", Qty: 2},
 		},
-		CreatedAt: time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC),
+		Audit: &domain.TransactionAudit{
+			Decision:  domain.AuditDecisionApproved,
+			RiskScore: 0.05,
+			Reason:    "safe transaction",
+			Provider:  "gemini",
+			Model:     "gemini-2.5-flash",
+			AuditedAt: time.Date(2026, 4, 1, 10, 0, 1, 0, time.UTC),
+		},
+		CreatedAt: time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC),
 	}
 
 	repo := &fakeTransactionRepo{
@@ -223,11 +254,17 @@ func TestCreateTransaction_ReplayByIdempotencyKey(t *testing.T) {
 	if result.Transaction.ID != existing.ID {
 		t.Fatalf("expected existing transaction id %q, got %q", existing.ID, result.Transaction.ID)
 	}
+	if result.Transaction.Audit == nil {
+		t.Fatal("expected replay to include audit metadata")
+	}
 	if repo.createCalls != 0 {
 		t.Fatalf("expected repo.Create not called, got %d", repo.createCalls)
 	}
 	if repo.updateStatusCalls != 0 {
 		t.Fatalf("expected repo.UpdateStatus not called, got %d", repo.updateStatusCalls)
+	}
+	if repo.updateAuditCalls != 0 {
+		t.Fatalf("expected repo.UpdateAudit not called, got %d", repo.updateAuditCalls)
 	}
 	if stockRepo.getCalls != 0 || stockRepo.deductCalls != 0 {
 		t.Fatalf("expected stock repo not called on replay, got checks=%d deduct=%d", stockRepo.getCalls, stockRepo.deductCalls)
@@ -317,6 +354,7 @@ func TestCreateTransaction_AuditReviewMarksPendingReview(t *testing.T) {
 		result: domain.AuditTransactionResult{
 			Decision:  domain.AuditDecisionReview,
 			RiskScore: 0.60,
+			Reason:    "requires pharmacist review",
 			Provider:  "gemini",
 			Model:     "gemini-2.5-flash",
 		},
@@ -339,6 +377,12 @@ func TestCreateTransaction_AuditReviewMarksPendingReview(t *testing.T) {
 	if auditRepo.calls != 1 {
 		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
 	}
+	if repo.updateAuditCalls != 1 {
+		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
+	}
+	if repo.auditValue.Reason != "requires pharmacist review" {
+		t.Fatalf("expected stored audit reason, got %q", repo.auditValue.Reason)
+	}
 	if repo.updateStatusCalls != 1 {
 		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
 	}
@@ -347,6 +391,9 @@ func TestCreateTransaction_AuditReviewMarksPendingReview(t *testing.T) {
 	}
 	if result.Transaction.Status != domain.TransactionStatusPendingReview {
 		t.Fatalf("expected returned status PENDING_REVIEW, got %s", result.Transaction.Status)
+	}
+	if result.Transaction.Audit == nil {
+		t.Fatal("expected audit metadata on pending review transaction")
 	}
 	if stockRepo.deductCalls != 0 {
 		t.Fatalf("expected no stock deduction for review, got %d", stockRepo.deductCalls)
@@ -365,6 +412,7 @@ func TestCreateTransaction_HighRiskReviewMarksFlagged(t *testing.T) {
 		result: domain.AuditTransactionResult{
 			Decision:  domain.AuditDecisionReview,
 			RiskScore: 0.91,
+			Reason:    "high-risk medicine detected",
 			Provider:  "mock",
 			Model:     "rule-based-v1",
 		},
@@ -381,6 +429,9 @@ func TestCreateTransaction_HighRiskReviewMarksFlagged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+	if repo.updateAuditCalls != 1 {
+		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
+	}
 	if repo.updateStatusCalls != 1 {
 		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
 	}
@@ -389,6 +440,9 @@ func TestCreateTransaction_HighRiskReviewMarksFlagged(t *testing.T) {
 	}
 	if result.Transaction.Status != domain.TransactionStatusFlagged {
 		t.Fatalf("expected returned status FLAGGED, got %s", result.Transaction.Status)
+	}
+	if result.Transaction.Audit == nil {
+		t.Fatal("expected audit metadata on flagged transaction")
 	}
 	if stockRepo.deductCalls != 0 {
 		t.Fatalf("expected no stock deduction for flagged transaction, got %d", stockRepo.deductCalls)
@@ -421,6 +475,12 @@ func TestCreateTransaction_AuditErrorMarksPendingReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+	if repo.updateAuditCalls != 1 {
+		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
+	}
+	if repo.auditValue.Provider != "system" {
+		t.Fatalf("expected audit provider system, got %q", repo.auditValue.Provider)
+	}
 	if repo.updateStatusCalls != 1 {
 		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
 	}
@@ -429,6 +489,9 @@ func TestCreateTransaction_AuditErrorMarksPendingReview(t *testing.T) {
 	}
 	if result.Transaction.Status != domain.TransactionStatusPendingReview {
 		t.Fatalf("expected returned status PENDING_REVIEW, got %s", result.Transaction.Status)
+	}
+	if result.Transaction.Audit == nil {
+		t.Fatal("expected audit metadata on fallback review transaction")
 	}
 	if stockRepo.deductCalls != 0 {
 		t.Fatalf("expected no stock deduction when ai auditor fails, got %d", stockRepo.deductCalls)
@@ -452,9 +515,11 @@ func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
 	}
 	auditRepo := &fakeAuditRepo{
 		result: domain.AuditTransactionResult{
-			Decision: domain.AuditDecisionApproved,
-			Provider: "gemini",
-			Model:    "gemini-2.5-flash",
+			Decision:  domain.AuditDecisionApproved,
+			RiskScore: 0.05,
+			Reason:    "safe transaction",
+			Provider:  "gemini",
+			Model:     "gemini-2.5-flash",
 		},
 	}
 
@@ -480,6 +545,9 @@ func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
 	if auditRepo.calls != 1 {
 		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
 	}
+	if repo.updateAuditCalls != 1 {
+		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
+	}
 	if repo.updateStatusCalls != 1 {
 		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
 	}
@@ -489,6 +557,9 @@ func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
 	if result.Transaction.Status != domain.TransactionStatusFailed {
 		t.Fatalf("expected returned transaction status FAILED, got %s", result.Transaction.Status)
 	}
+	if result.Transaction.Audit == nil {
+		t.Fatal("expected failed transaction to still carry audit metadata")
+	}
 }
 
 func TestListTransactions_DefaultPagination(t *testing.T) {
@@ -496,12 +567,20 @@ func TestListTransactions_DefaultPagination(t *testing.T) {
 		listResult: domain.ListTransactionsResult{
 			Items: []domain.Transaction{
 				{
-					ID:     "TXN-20260331093000-AAAA1111",
+					ID:     "TXN-20260401093000-AAAA1111",
 					Status: domain.TransactionStatusApproved,
 					Items: []domain.TransactionItem{
 						{MedicineID: "PARA500", Qty: 2},
 					},
-					CreatedAt: time.Date(2026, 3, 31, 9, 30, 0, 0, time.UTC),
+					Audit: &domain.TransactionAudit{
+						Decision:  domain.AuditDecisionApproved,
+						RiskScore: 0.05,
+						Reason:    "safe transaction",
+						Provider:  "gemini",
+						Model:     "gemini-2.5-flash",
+						AuditedAt: time.Date(2026, 4, 1, 9, 30, 5, 0, time.UTC),
+					},
+					CreatedAt: time.Date(2026, 4, 1, 9, 30, 0, 0, time.UTC),
 				},
 			},
 			Limit:  10,
@@ -532,6 +611,9 @@ func TestListTransactions_DefaultPagination(t *testing.T) {
 	}
 	if result.Total != 1 {
 		t.Fatalf("expected total 1, got %d", result.Total)
+	}
+	if result.Items[0].Audit == nil {
+		t.Fatal("expected list result to include audit metadata")
 	}
 }
 

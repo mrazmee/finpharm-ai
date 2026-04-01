@@ -15,11 +15,21 @@ const (
 	TransactionStatusFailed        TransactionStatus = "FAILED"
 )
 
+type TransactionAudit struct {
+	Decision  AuditDecision
+	RiskScore float64
+	Reason    string
+	Provider  string
+	Model     string
+	AuditedAt time.Time
+}
+
 type Transaction struct {
 	ID             string
 	IdempotencyKey string
 	Status         TransactionStatus
 	Items          []TransactionItem
+	Audit          *TransactionAudit
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -63,6 +73,7 @@ type ListTransactionsResult struct {
 type TransactionRepository interface {
 	Create(ctx context.Context, tx Transaction) (CreateTransactionResult, error)
 	UpdateStatus(ctx context.Context, transactionID string, status TransactionStatus) error
+	UpdateAudit(ctx context.Context, transactionID string, audit TransactionAudit) error
 	GetByIdempotencyKey(ctx context.Context, key string) (Transaction, bool, error)
 	List(ctx context.Context, req ListTransactionsRequest) (ListTransactionsResult, error)
 }

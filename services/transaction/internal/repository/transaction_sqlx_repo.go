@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strings"
 	"time"
 
 	"finpharm-ai/services/transaction/internal/domain"
@@ -22,11 +21,17 @@ func NewTransactionSQLXRepo(db *sqlx.DB) *TransactionSQLXRepo {
 }
 
 type transactionRow struct {
-	ID             string    `db:"id"`
-	IdempotencyKey string    `db:"idempotency_key"`
-	Status         string    `db:"status"`
-	CreatedAt      time.Time `db:"created_at"`
-	UpdatedAt      time.Time `db:"updated_at"`
+	ID             string     `db:"id"`
+	IdempotencyKey string     `db:"idempotency_key"`
+	Status         string     `db:"status"`
+	AuditDecision  *string    `db:"audit_decision"`
+	AuditRiskScore *float64   `db:"audit_risk_score"`
+	AuditReason    *string    `db:"audit_reason"`
+	AuditProvider  *string    `db:"audit_provider"`
+	AuditModel     *string    `db:"audit_model"`
+	AuditedAt      *time.Time `db:"audited_at"`
+	CreatedAt      time.Time  `db:"created_at"`
+	UpdatedAt      time.Time  `db:"updated_at"`
 }
 
 type transactionItemRow struct {
@@ -38,28 +43,33 @@ type transactionItemRow struct {
 }
 
 func (r *TransactionSQLXRepo) Create(ctx context.Context, tx domain.Transaction) (domain.CreateTransactionResult, error) {
+	now := time.Now().UTC()
+	if tx.CreatedAt.IsZero() {
+		tx.CreatedAt = now
+	}
+	tx.UpdatedAt = tx.CreatedAt
+
 	dbtx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return domain.CreateTransactionResult{}, err
 	}
-
-	committed := false
 	defer func() {
-		if !committed {
-			_ = dbtx.Rollback()
-		}
+		_ = dbtx.Rollback()
 	}()
 
-	const insertTransaction = `
-		INSERT INTO transactions (id, idempotency_key, status)
-		VALUES ($1, $2, $3)
-		RETURNING id, idempotency_key, status, created_at, updated_at
-	`
-
-	var header transactionRow
-	if err := dbtx.GetContext(ctx, &header, insertTransaction, tx.ID, tx.IdempotencyKey, string(tx.Status)); err != nil {
+	_, err = dbtx.ExecContext(
+		ctx,
+		`INSERT INTO transactions (id, idempotency_key, status, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		tx.ID,
+		tx.IdempotencyKey,
+		string(tx.Status),
+		tx.CreatedAt,
+		tx.UpdatedAt,
+	)
+	if err != nil {
 		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "idx_transactions_idempotency_key" {
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
 			existing, found, getErr := r.GetByIdempotencyKey(ctx, tx.IdempotencyKey)
 			if getErr != nil {
 				return domain.CreateTransactionResult{}, getErr
@@ -74,185 +84,228 @@ func (r *TransactionSQLXRepo) Create(ctx context.Context, tx domain.Transaction)
 		return domain.CreateTransactionResult{}, err
 	}
 
-	const insertItem = `
-		INSERT INTO transaction_items (transaction_id, medicine_id, qty)
-		VALUES ($1, $2, $3)
-		RETURNING id, transaction_id, medicine_id, qty, created_at
-	`
-
-	items := make([]domain.TransactionItem, 0, len(tx.Items))
-	for _, item := range tx.Items {
-		var row transactionItemRow
-		if err := dbtx.GetContext(ctx, &row, insertItem, header.ID, item.MedicineID, item.Qty); err != nil {
+	for i := range tx.Items {
+		itemCreatedAt := now
+		_, err := dbtx.ExecContext(
+			ctx,
+			`INSERT INTO transaction_items (transaction_id, medicine_id, qty, created_at)
+			 VALUES ($1, $2, $3, $4)`,
+			tx.ID,
+			tx.Items[i].MedicineID,
+			tx.Items[i].Qty,
+			itemCreatedAt,
+		)
+		if err != nil {
 			return domain.CreateTransactionResult{}, err
 		}
-
-		items = append(items, domain.TransactionItem{
-			ID:            row.ID,
-			TransactionID: row.TransactionID,
-			MedicineID:    row.MedicineID,
-			Qty:           row.Qty,
-			CreatedAt:     row.CreatedAt,
-		})
+		tx.Items[i].TransactionID = tx.ID
+		tx.Items[i].CreatedAt = itemCreatedAt
 	}
 
 	if err := dbtx.Commit(); err != nil {
 		return domain.CreateTransactionResult{}, err
 	}
-	committed = true
 
 	return domain.CreateTransactionResult{
-		Transaction: domain.Transaction{
-			ID:             header.ID,
-			IdempotencyKey: header.IdempotencyKey,
-			Status:         domain.TransactionStatus(header.Status),
-			Items:          items,
-			CreatedAt:      header.CreatedAt,
-			UpdatedAt:      header.UpdatedAt,
-		},
-		IsReplay: false,
+		Transaction: tx,
+		IsReplay:    false,
 	}, nil
 }
 
 func (r *TransactionSQLXRepo) UpdateStatus(ctx context.Context, transactionID string, status domain.TransactionStatus) error {
-	const query = `
-		UPDATE transactions
-		SET status = $2, updated_at = NOW()
-		WHERE id = $1
-	`
+	_, err := r.db.ExecContext(
+		ctx,
+		`UPDATE transactions
+		 SET status = $2, updated_at = NOW()
+		 WHERE id = $1`,
+		transactionID,
+		string(status),
+	)
+	return err
+}
 
-	_, err := r.db.ExecContext(ctx, query, transactionID, string(status))
+func (r *TransactionSQLXRepo) UpdateAudit(ctx context.Context, transactionID string, audit domain.TransactionAudit) error {
+	auditedAt := audit.AuditedAt
+	if auditedAt.IsZero() {
+		auditedAt = time.Now().UTC()
+	}
+
+	_, err := r.db.ExecContext(
+		ctx,
+		`UPDATE transactions
+		 SET audit_decision = $2,
+		     audit_risk_score = $3,
+		     audit_reason = $4,
+		     audit_provider = $5,
+		     audit_model = $6,
+		     audited_at = $7,
+		     updated_at = NOW()
+		 WHERE id = $1`,
+		transactionID,
+		string(audit.Decision),
+		audit.RiskScore,
+		audit.Reason,
+		audit.Provider,
+		audit.Model,
+		auditedAt,
+	)
 	return err
 }
 
 func (r *TransactionSQLXRepo) GetByIdempotencyKey(ctx context.Context, key string) (domain.Transaction, bool, error) {
-	const query = `
-		SELECT id, idempotency_key, status, created_at, updated_at
-		FROM transactions
-		WHERE idempotency_key = $1
-	`
-
-	var header transactionRow
-	if err := r.db.GetContext(ctx, &header, query, key); err != nil {
+	var row transactionRow
+	err := r.db.GetContext(
+		ctx,
+		&row,
+		`SELECT id, idempotency_key, status,
+		        audit_decision, audit_risk_score, audit_reason, audit_provider, audit_model, audited_at,
+		        created_at, updated_at
+		   FROM transactions
+		  WHERE idempotency_key = $1`,
+		key,
+	)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Transaction{}, false, nil
 		}
 		return domain.Transaction{}, false, err
 	}
 
-	itemsByTxID, err := r.loadItemsByTransactionIDs(ctx, []string{header.ID})
+	items, err := r.getItemsByTransactionID(ctx, row.ID)
 	if err != nil {
 		return domain.Transaction{}, false, err
 	}
 
-	return domain.Transaction{
-		ID:             header.ID,
-		IdempotencyKey: header.IdempotencyKey,
-		Status:         domain.TransactionStatus(header.Status),
-		Items:          itemsByTxID[header.ID],
-		CreatedAt:      header.CreatedAt,
-		UpdatedAt:      header.UpdatedAt,
-	}, true, nil
+	return toDomainTransaction(row, items), true, nil
 }
 
 func (r *TransactionSQLXRepo) List(ctx context.Context, req domain.ListTransactionsRequest) (domain.ListTransactionsResult, error) {
-	status := strings.TrimSpace(req.Status)
-
-	const countQuery = `
-		SELECT COUNT(*)
-		FROM transactions
-		WHERE ($1 = '' OR status = $1)
-	`
-
 	var total int
-	if err := r.db.GetContext(ctx, &total, countQuery, status); err != nil {
-		return domain.ListTransactionsResult{}, err
+	var rows []transactionRow
+	var err error
+
+	if req.Status == "" {
+		err = r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM transactions`)
+		if err != nil {
+			return domain.ListTransactionsResult{}, err
+		}
+
+		err = r.db.SelectContext(
+			ctx,
+			&rows,
+			`SELECT id, idempotency_key, status,
+			        audit_decision, audit_risk_score, audit_reason, audit_provider, audit_model, audited_at,
+			        created_at, updated_at
+			   FROM transactions
+			  ORDER BY created_at DESC
+			  LIMIT $1 OFFSET $2`,
+			req.Limit,
+			req.Offset,
+		)
+		if err != nil {
+			return domain.ListTransactionsResult{}, err
+		}
+	} else {
+		err = r.db.GetContext(ctx, &total, `SELECT COUNT(*) FROM transactions WHERE status = $1`, req.Status)
+		if err != nil {
+			return domain.ListTransactionsResult{}, err
+		}
+
+		err = r.db.SelectContext(
+			ctx,
+			&rows,
+			`SELECT id, idempotency_key, status,
+			        audit_decision, audit_risk_score, audit_reason, audit_provider, audit_model, audited_at,
+			        created_at, updated_at
+			   FROM transactions
+			  WHERE status = $1
+			  ORDER BY created_at DESC
+			  LIMIT $2 OFFSET $3`,
+			req.Status,
+			req.Limit,
+			req.Offset,
+		)
+		if err != nil {
+			return domain.ListTransactionsResult{}, err
+		}
 	}
 
-	const listTransactionsQuery = `
-		SELECT id, idempotency_key, status, created_at, updated_at
-		FROM transactions
-		WHERE ($1 = '' OR status = $1)
-		ORDER BY created_at DESC, id DESC
-		LIMIT $2 OFFSET $3
-	`
-
-	var headers []transactionRow
-	if err := r.db.SelectContext(ctx, &headers, listTransactionsQuery, status, req.Limit, req.Offset); err != nil {
-		return domain.ListTransactionsResult{}, err
-	}
-
-	transactions := make([]domain.Transaction, 0, len(headers))
-	if len(headers) == 0 {
-		return domain.ListTransactionsResult{
-			Items:  transactions,
-			Limit:  req.Limit,
-			Offset: req.Offset,
-			Total:  total,
-		}, nil
-	}
-
-	ids := make([]string, 0, len(headers))
-	for _, row := range headers {
-		transactions = append(transactions, domain.Transaction{
-			ID:             row.ID,
-			IdempotencyKey: row.IdempotencyKey,
-			Status:         domain.TransactionStatus(row.Status),
-			Items:          []domain.TransactionItem{},
-			CreatedAt:      row.CreatedAt,
-			UpdatedAt:      row.UpdatedAt,
-		})
-		ids = append(ids, row.ID)
-	}
-
-	itemsByTxID, err := r.loadItemsByTransactionIDs(ctx, ids)
-	if err != nil {
-		return domain.ListTransactionsResult{}, err
-	}
-
-	for i := range transactions {
-		transactions[i].Items = itemsByTxID[transactions[i].ID]
+	items := make([]domain.Transaction, 0, len(rows))
+	for _, row := range rows {
+		txItems, err := r.getItemsByTransactionID(ctx, row.ID)
+		if err != nil {
+			return domain.ListTransactionsResult{}, err
+		}
+		items = append(items, toDomainTransaction(row, txItems))
 	}
 
 	return domain.ListTransactionsResult{
-		Items:  transactions,
+		Items:  items,
 		Limit:  req.Limit,
 		Offset: req.Offset,
 		Total:  total,
 	}, nil
 }
 
-func (r *TransactionSQLXRepo) loadItemsByTransactionIDs(ctx context.Context, ids []string) (map[string][]domain.TransactionItem, error) {
-	itemsByTxID := make(map[string][]domain.TransactionItem, len(ids))
-	if len(ids) == 0 {
-		return itemsByTxID, nil
-	}
-
-	query, args, err := sqlx.In(`
-		SELECT id, transaction_id, medicine_id, qty, created_at
-		FROM transaction_items
-		WHERE transaction_id IN (?)
-		ORDER BY id ASC
-	`, ids)
+func (r *TransactionSQLXRepo) getItemsByTransactionID(ctx context.Context, transactionID string) ([]transactionItemRow, error) {
+	var rows []transactionItemRow
+	err := r.db.SelectContext(
+		ctx,
+		&rows,
+		`SELECT id, transaction_id, medicine_id, qty, created_at
+		   FROM transaction_items
+		  WHERE transaction_id = $1
+		  ORDER BY id ASC`,
+		transactionID,
+	)
 	if err != nil {
 		return nil, err
 	}
-	query = r.db.Rebind(query)
+	return rows, nil
+}
 
-	var rows []transactionItemRow
-	if err := r.db.SelectContext(ctx, &rows, query, args...); err != nil {
-		return nil, err
-	}
-
-	for _, row := range rows {
-		itemsByTxID[row.TransactionID] = append(itemsByTxID[row.TransactionID], domain.TransactionItem{
-			ID:            row.ID,
-			TransactionID: row.TransactionID,
-			MedicineID:    row.MedicineID,
-			Qty:           row.Qty,
-			CreatedAt:     row.CreatedAt,
+func toDomainTransaction(row transactionRow, items []transactionItemRow) domain.Transaction {
+	txItems := make([]domain.TransactionItem, 0, len(items))
+	for _, item := range items {
+		txItems = append(txItems, domain.TransactionItem{
+			ID:            item.ID,
+			TransactionID: item.TransactionID,
+			MedicineID:    item.MedicineID,
+			Qty:           item.Qty,
+			CreatedAt:     item.CreatedAt,
 		})
 	}
 
-	return itemsByTxID, nil
+	var audit *domain.TransactionAudit
+	if row.AuditDecision != nil || row.AuditRiskScore != nil || row.AuditReason != nil || row.AuditProvider != nil || row.AuditModel != nil || row.AuditedAt != nil {
+		audit = &domain.TransactionAudit{}
+		if row.AuditDecision != nil {
+			audit.Decision = domain.AuditDecision(*row.AuditDecision)
+		}
+		if row.AuditRiskScore != nil {
+			audit.RiskScore = *row.AuditRiskScore
+		}
+		if row.AuditReason != nil {
+			audit.Reason = *row.AuditReason
+		}
+		if row.AuditProvider != nil {
+			audit.Provider = *row.AuditProvider
+		}
+		if row.AuditModel != nil {
+			audit.Model = *row.AuditModel
+		}
+		if row.AuditedAt != nil {
+			audit.AuditedAt = *row.AuditedAt
+		}
+	}
+
+	return domain.Transaction{
+		ID:             row.ID,
+		IdempotencyKey: row.IdempotencyKey,
+		Status:         domain.TransactionStatus(row.Status),
+		Items:          txItems,
+		Audit:          audit,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
+	}
 }

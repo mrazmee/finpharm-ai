@@ -32,10 +32,20 @@ type CreateTransactionItemRequest struct {
 	Qty        int    `json:"qty"`
 }
 
+type TransactionAuditResponse struct {
+	Decision  string    `json:"decision"`
+	RiskScore float64   `json:"risk_score"`
+	Reason    string    `json:"reason"`
+	Provider  string    `json:"provider"`
+	Model     string    `json:"model"`
+	AuditedAt time.Time `json:"audited_at"`
+}
+
 type TransactionResponse struct {
 	ID        string                          `json:"id"`
 	Status    string                          `json:"status"`
 	Items     []CreateTransactionItemResponse `json:"items"`
+	Audit     *TransactionAuditResponse       `json:"audit,omitempty"`
 	CreatedAt time.Time                       `json:"created_at"`
 }
 
@@ -223,10 +233,23 @@ func toTransactionResponse(tx domain.Transaction) TransactionResponse {
 		})
 	}
 
+	var audit *TransactionAuditResponse
+	if tx.Audit != nil {
+		audit = &TransactionAuditResponse{
+			Decision:  string(tx.Audit.Decision),
+			RiskScore: tx.Audit.RiskScore,
+			Reason:    tx.Audit.Reason,
+			Provider:  tx.Audit.Provider,
+			Model:     tx.Audit.Model,
+			AuditedAt: tx.Audit.AuditedAt,
+		}
+	}
+
 	return TransactionResponse{
 		ID:        tx.ID,
 		Status:    string(tx.Status),
 		Items:     respItems,
+		Audit:     audit,
 		CreatedAt: tx.CreatedAt,
 	}
 }

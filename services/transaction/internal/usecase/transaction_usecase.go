@@ -123,7 +123,18 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 	tx := createResult.Transaction
 
 	if u.auditRepo == nil {
-		return u.markReviewStatus(ctx, tx, domain.TransactionStatusPendingReview)
+		audit := domain.TransactionAudit{
+			Decision:  domain.AuditDecisionReview,
+			RiskScore: 0.50,
+			Reason:    "ai auditor is not configured; manual review required",
+			Provider:  "system",
+			Model:     "fallback-pending-review",
+			AuditedAt: time.Now().UTC(),
+		}
+		if err := u.repo.UpdateAudit(ctx, tx.ID, audit); err != nil {
+			return domain.CreateTransactionResult{}, err
+		}
+		return u.markReviewStatus(ctx, tx, audit, domain.TransactionStatusPendingReview)
 	}
 
 	auditItems := make([]domain.AuditTransactionItem, 0, len(tx.Items))
@@ -139,7 +150,30 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 		Items:         auditItems,
 	})
 	if err != nil {
-		return u.markReviewStatus(ctx, tx, domain.TransactionStatusPendingReview)
+		audit := domain.TransactionAudit{
+			Decision:  domain.AuditDecisionReview,
+			RiskScore: 0.50,
+			Reason:    "ai auditor unavailable; manual review required",
+			Provider:  "system",
+			Model:     "fallback-pending-review",
+			AuditedAt: time.Now().UTC(),
+		}
+		if err := u.repo.UpdateAudit(ctx, tx.ID, audit); err != nil {
+			return domain.CreateTransactionResult{}, err
+		}
+		return u.markReviewStatus(ctx, tx, audit, domain.TransactionStatusPendingReview)
+	}
+
+	audit := domain.TransactionAudit{
+		Decision:  auditResult.Decision,
+		RiskScore: auditResult.RiskScore,
+		Reason:    auditResult.Reason,
+		Provider:  auditResult.Provider,
+		Model:     auditResult.Model,
+		AuditedAt: time.Now().UTC(),
+	}
+	if err := u.repo.UpdateAudit(ctx, tx.ID, audit); err != nil {
+		return domain.CreateTransactionResult{}, err
 	}
 
 	if auditResult.Decision == domain.AuditDecisionReview {
@@ -147,7 +181,7 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 		if auditResult.RiskScore >= flaggedRiskThreshold {
 			status = domain.TransactionStatusFlagged
 		}
-		return u.markReviewStatus(ctx, tx, status)
+		return u.markReviewStatus(ctx, tx, audit, status)
 	}
 
 	for _, item := range tx.Items {
@@ -156,6 +190,7 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 				return domain.CreateTransactionResult{}, updateErr
 			}
 			tx.Status = domain.TransactionStatusFailed
+			tx.Audit = &audit
 			return domain.CreateTransactionResult{
 				Transaction: tx,
 				IsReplay:    false,
@@ -168,17 +203,19 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 	}
 
 	tx.Status = domain.TransactionStatusApproved
+	tx.Audit = &audit
 	return domain.CreateTransactionResult{
 		Transaction: tx,
 		IsReplay:    false,
 	}, nil
 }
 
-func (u *TransactionUsecase) markReviewStatus(ctx context.Context, tx domain.Transaction, status domain.TransactionStatus) (domain.CreateTransactionResult, error) {
+func (u *TransactionUsecase) markReviewStatus(ctx context.Context, tx domain.Transaction, audit domain.TransactionAudit, status domain.TransactionStatus) (domain.CreateTransactionResult, error) {
 	if err := u.repo.UpdateStatus(ctx, tx.ID, status); err != nil {
 		return domain.CreateTransactionResult{}, err
 	}
 	tx.Status = status
+	tx.Audit = &audit
 	return domain.CreateTransactionResult{
 		Transaction: tx,
 		IsReplay:    false,
