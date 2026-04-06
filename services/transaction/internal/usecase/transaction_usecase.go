@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -17,17 +18,20 @@ type TransactionUsecase struct {
 	repo      domain.TransactionRepository
 	stockRepo domain.StockRepository
 	auditRepo domain.AIAuditorRepository
+	publisher domain.TransactionEventPublisher
 }
 
 func NewTransactionUsecase(
 	repo domain.TransactionRepository,
 	stockRepo domain.StockRepository,
 	auditRepo domain.AIAuditorRepository,
+	publisher domain.TransactionEventPublisher,
 ) *TransactionUsecase {
 	return &TransactionUsecase{
 		repo:      repo,
 		stockRepo: stockRepo,
 		auditRepo: auditRepo,
+		publisher: publisher,
 	}
 }
 
@@ -204,10 +208,55 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 
 	tx.Status = domain.TransactionStatusApproved
 	tx.Audit = &audit
+
+	u.publishApprovedEvent(ctx, tx)
+
 	return domain.CreateTransactionResult{
 		Transaction: tx,
 		IsReplay:    false,
 	}, nil
+}
+
+func (u *TransactionUsecase) publishApprovedEvent(ctx context.Context, tx domain.Transaction) {
+	if u.publisher == nil {
+		return
+	}
+
+	event := domain.TransactionApprovedEvent{
+		EventName:      "transaction.approved",
+		TransactionID:  tx.ID,
+		IdempotencyKey: tx.IdempotencyKey,
+		Status:         string(tx.Status),
+		Items:          make([]domain.TransactionApprovedEventItem, 0, len(tx.Items)),
+		CreatedAt:      tx.CreatedAt,
+		PublishedAt:    time.Now().UTC(),
+	}
+
+	for _, item := range tx.Items {
+		event.Items = append(event.Items, domain.TransactionApprovedEventItem{
+			MedicineID: item.MedicineID,
+			Qty:        item.Qty,
+		})
+	}
+
+	if tx.Audit != nil {
+		event.Audit = &domain.TransactionApprovedEventAudit{
+			Decision:  string(tx.Audit.Decision),
+			RiskScore: tx.Audit.RiskScore,
+			Reason:    tx.Audit.Reason,
+			Provider:  tx.Audit.Provider,
+			Model:     tx.Audit.Model,
+			AuditedAt: tx.Audit.AuditedAt,
+		}
+	}
+
+	if err := u.publisher.PublishTransactionApproved(ctx, event); err != nil {
+		slog.Warn("publish_transaction_approved_failed",
+			"transaction_id", tx.ID,
+			"event_name", event.EventName,
+			"error", err,
+		)
+	}
 }
 
 func (u *TransactionUsecase) markReviewStatus(ctx context.Context, tx domain.Transaction, audit domain.TransactionAudit, status domain.TransactionStatus) (domain.CreateTransactionResult, error) {

@@ -6,6 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/lib/pq v1.11.2
+	github.com/rabbitmq/amqp091-go v1.10.0
 )
 
 require (

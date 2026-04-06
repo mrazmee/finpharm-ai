@@ -21,6 +21,11 @@ type Config struct {
 	AIAuditorBaseURL string
 	AIAuditorTimeout time.Duration
 
+	RabbitMQURL                        string
+	RabbitMQExchange                   string
+	RabbitMQTransactionApprovedQueue   string
+	RabbitMQTransactionApprovedRouting string
+
 	DBHost     string
 	DBPort     string
 	DBUser     string
@@ -48,6 +53,11 @@ func Load() Config {
 		InventoryBaseURL: getEnv("INVENTORY_BASE_URL", "http://localhost:8082"),
 		AIAuditorBaseURL: getEnv("AI_AUDITOR_BASE_URL", "http://localhost:8083"),
 		AIAuditorTimeout: time.Duration(aiAuditorTimeoutMs) * time.Millisecond,
+
+		RabbitMQURL:                        getEnv("RABBITMQ_URL", "amqp://finpharm:finpharm@localhost:5672/"),
+		RabbitMQExchange:                   getEnv("RABBITMQ_EXCHANGE", "finpharm.events"),
+		RabbitMQTransactionApprovedQueue:   getEnv("RABBITMQ_TRANSACTION_APPROVED_QUEUE", "transaction.approved.queue"),
+		RabbitMQTransactionApprovedRouting: getEnv("RABBITMQ_TRANSACTION_APPROVED_ROUTING_KEY", "transaction.approved"),
 
 		DBHost:     getEnv("DB_HOST", "127.0.0.1"),
 		DBPort:     getEnv("DB_PORT", "55432"),

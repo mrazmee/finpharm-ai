@@ -46,8 +46,31 @@ func main() {
 	aiAuditorClient := &http.Client{Timeout: cfg.AIAuditorTimeout + time.Second}
 	aiAuditorRepo := repository.NewAIAuditorHTTPRepo(cfg.AIAuditorBaseURL, aiAuditorClient, cfg.AIAuditorTimeout)
 
+	var eventPublisher *repository.RabbitMQTransactionEventPublisher
+	if cfg.RabbitMQURL != "" {
+		publisher, err := repository.NewRabbitMQTransactionEventPublisher(
+			cfg.RabbitMQURL,
+			cfg.RabbitMQExchange,
+			cfg.RabbitMQTransactionApprovedQueue,
+			cfg.RabbitMQTransactionApprovedRouting,
+		)
+		if err != nil {
+			slog.Warn("rabbitmq_publisher_init_failed",
+				"error", err,
+				"rabbitmq_url", cfg.RabbitMQURL,
+			)
+		} else {
+			eventPublisher = publisher
+			defer func() {
+				if err := eventPublisher.Close(); err != nil {
+					slog.Warn("rabbitmq_publisher_close_failed", "error", err)
+				}
+			}()
+		}
+	}
+
 	stockUC := usecase.NewStockUsecase(stockRepo)
-	txUC := usecase.NewTransactionUsecase(txRepo, stockRepo, aiAuditorRepo)
+	txUC := usecase.NewTransactionUsecase(txRepo, stockRepo, aiAuditorRepo, eventPublisher)
 
 	stockHandler := handler.NewStockHandler(stockUC)
 	txHandler := handler.NewTransactionHandler(txUC)
@@ -68,6 +91,9 @@ func main() {
 			"inventory_base_url", cfg.InventoryBaseURL,
 			"ai_auditor_base_url", cfg.AIAuditorBaseURL,
 			"ai_auditor_timeout_ms", int(cfg.AIAuditorTimeout.Milliseconds()),
+			"rabbitmq_exchange", cfg.RabbitMQExchange,
+			"rabbitmq_transaction_approved_queue", cfg.RabbitMQTransactionApprovedQueue,
+			"rabbitmq_transaction_approved_routing_key", cfg.RabbitMQTransactionApprovedRouting,
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

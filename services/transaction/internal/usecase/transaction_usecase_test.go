@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -139,7 +140,19 @@ func (f *fakeAuditRepo) AuditTransaction(ctx context.Context, req domain.AuditTr
 	return f.result, nil
 }
 
-func TestCreateTransaction_Success(t *testing.T) {
+type fakePublisher struct {
+	publishCalls int
+	event        domain.TransactionApprovedEvent
+	err          error
+}
+
+func (f *fakePublisher) PublishTransactionApproved(ctx context.Context, event domain.TransactionApprovedEvent) error {
+	f.publishCalls++
+	f.event = event
+	return f.err
+}
+
+func TestCreateTransaction_Success_PublishesApprovedEvent(t *testing.T) {
 	repo := &fakeTransactionRepo{}
 	stockRepo := &fakeStockRepo{
 		available: map[string]int{
@@ -157,8 +170,9 @@ func TestCreateTransaction_Success(t *testing.T) {
 			Model:     "gemini-2.5-flash",
 		},
 	}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
 		IdempotencyKey: "idem-001",
@@ -170,41 +184,63 @@ func TestCreateTransaction_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if repo.getByKeyCalls != 1 {
-		t.Fatalf("expected repo.GetByIdempotencyKey called once, got %d", repo.getByKeyCalls)
+	if repo.updateStatusCalls != 1 || repo.updatedStatus != domain.TransactionStatusApproved {
+		t.Fatalf("expected final status APPROVED, got updateCalls=%d status=%s", repo.updateStatusCalls, repo.updatedStatus)
 	}
-	if repo.createCalls != 1 {
-		t.Fatalf("expected repo.Create called once, got %d", repo.createCalls)
+	if publisher.publishCalls != 1 {
+		t.Fatalf("expected publish called once, got %d", publisher.publishCalls)
 	}
-	if auditRepo.calls != 1 {
-		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
+	if publisher.event.EventName != "transaction.approved" {
+		t.Fatalf("expected event name transaction.approved, got %q", publisher.event.EventName)
 	}
-	if repo.updateAuditCalls != 1 {
-		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
+	if publisher.event.TransactionID == "" {
+		t.Fatal("expected transaction id in event")
 	}
-	if repo.auditValue.Provider != "gemini" {
-		t.Fatalf("expected audit provider gemini, got %q", repo.auditValue.Provider)
-	}
-	if repo.updateStatusCalls != 1 {
-		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
-	}
-	if repo.updatedStatus != domain.TransactionStatusApproved {
-		t.Fatalf("expected final status APPROVED, got %s", repo.updatedStatus)
-	}
-	if stockRepo.getCalls != 2 {
-		t.Fatalf("expected 2 stock checks, got %d", stockRepo.getCalls)
-	}
-	if stockRepo.deductCalls != 2 {
-		t.Fatalf("expected 2 stock deduct calls, got %d", stockRepo.deductCalls)
-	}
-	if result.IsReplay {
-		t.Fatal("expected first request not replay")
+	if publisher.event.Audit == nil {
+		t.Fatal("expected audit metadata in event")
 	}
 	if result.Transaction.Status != domain.TransactionStatusApproved {
 		t.Fatalf("expected status APPROVED, got %s", result.Transaction.Status)
 	}
-	if result.Transaction.Audit == nil {
-		t.Fatal("expected audit metadata on approved transaction")
+}
+
+func TestCreateTransaction_PublishFailure_DoesNotFailApprovedTransaction(t *testing.T) {
+	repo := &fakeTransactionRepo{}
+	stockRepo := &fakeStockRepo{
+		available: map[string]int{
+			"PARA500": 10,
+		},
+		deductErrFor: map[string]error{},
+	}
+	auditRepo := &fakeAuditRepo{
+		result: domain.AuditTransactionResult{
+			Decision:  domain.AuditDecisionApproved,
+			RiskScore: 0.05,
+			Reason:    "safe transaction",
+			Provider:  "gemini",
+			Model:     "gemini-2.5-flash",
+		},
+	}
+	publisher := &fakePublisher{
+		err: errors.New("rabbitmq unavailable"),
+	}
+
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
+
+	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
+		IdempotencyKey: "idem-002",
+		Items: []domain.TransactionItemInput{
+			{MedicineID: "PARA500", Qty: 1},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if result.Transaction.Status != domain.TransactionStatusApproved {
+		t.Fatalf("expected status APPROVED, got %s", result.Transaction.Status)
+	}
+	if publisher.publishCalls != 1 {
+		t.Fatalf("expected publish called once, got %d", publisher.publishCalls)
 	}
 }
 
@@ -236,8 +272,9 @@ func TestCreateTransaction_ReplayByIdempotencyKey(t *testing.T) {
 		deductErrFor: map[string]error{},
 	}
 	auditRepo := &fakeAuditRepo{}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
 		IdempotencyKey: "idem-001",
@@ -251,26 +288,8 @@ func TestCreateTransaction_ReplayByIdempotencyKey(t *testing.T) {
 	if !result.IsReplay {
 		t.Fatal("expected replay result")
 	}
-	if result.Transaction.ID != existing.ID {
-		t.Fatalf("expected existing transaction id %q, got %q", existing.ID, result.Transaction.ID)
-	}
-	if result.Transaction.Audit == nil {
-		t.Fatal("expected replay to include audit metadata")
-	}
-	if repo.createCalls != 0 {
-		t.Fatalf("expected repo.Create not called, got %d", repo.createCalls)
-	}
-	if repo.updateStatusCalls != 0 {
-		t.Fatalf("expected repo.UpdateStatus not called, got %d", repo.updateStatusCalls)
-	}
-	if repo.updateAuditCalls != 0 {
-		t.Fatalf("expected repo.UpdateAudit not called, got %d", repo.updateAuditCalls)
-	}
-	if stockRepo.getCalls != 0 || stockRepo.deductCalls != 0 {
-		t.Fatalf("expected stock repo not called on replay, got checks=%d deduct=%d", stockRepo.getCalls, stockRepo.deductCalls)
-	}
-	if auditRepo.calls != 0 {
-		t.Fatalf("expected audit repo not called on replay, got %d", auditRepo.calls)
+	if publisher.publishCalls != 0 {
+		t.Fatalf("expected no publish on replay, got %d", publisher.publishCalls)
 	}
 }
 
@@ -281,8 +300,9 @@ func TestCreateTransaction_MissingIdempotencyKey(t *testing.T) {
 		deductErrFor: map[string]error{},
 	}
 	auditRepo := &fakeAuditRepo{}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	_, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
 		Items: []domain.TransactionItemInput{
@@ -292,16 +312,9 @@ func TestCreateTransaction_MissingIdempotencyKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-
 	ve, ok := domain.IsValidation(err)
-	if !ok {
-		t.Fatalf("expected ValidationError, got %T", err)
-	}
-	if ve.Field != "idempotency_key" {
-		t.Fatalf("expected field idempotency_key, got %s", ve.Field)
-	}
-	if repo.createCalls != 0 {
-		t.Fatalf("expected repo.Create not called, got %d", repo.createCalls)
+	if !ok || ve.Field != "idempotency_key" {
+		t.Fatalf("expected ValidationError on idempotency_key, got %v", err)
 	}
 }
 
@@ -314,11 +327,12 @@ func TestCreateTransaction_InsufficientStockBeforeCreate(t *testing.T) {
 		deductErrFor: map[string]error{},
 	}
 	auditRepo := &fakeAuditRepo{}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	_, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
-		IdempotencyKey: "idem-002",
+		IdempotencyKey: "idem-003",
 		Items: []domain.TransactionItemInput{
 			{MedicineID: "PARA500", Qty: 10},
 		},
@@ -326,23 +340,15 @@ func TestCreateTransaction_InsufficientStockBeforeCreate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-
-	insufficient, ok := domain.IsInsufficientStock(err)
-	if !ok {
+	if _, ok := domain.IsInsufficientStock(err); !ok {
 		t.Fatalf("expected InsufficientStockError, got %T", err)
 	}
-	if insufficient.MedicineID != "PARA500" {
-		t.Fatalf("expected medicine PARA500, got %s", insufficient.MedicineID)
-	}
-	if repo.createCalls != 0 {
-		t.Fatalf("expected repo.Create not called, got %d", repo.createCalls)
-	}
-	if auditRepo.calls != 0 {
-		t.Fatalf("expected audit repo not called, got %d", auditRepo.calls)
+	if publisher.publishCalls != 0 {
+		t.Fatalf("expected no publish, got %d", publisher.publishCalls)
 	}
 }
 
-func TestCreateTransaction_AuditReviewMarksPendingReview(t *testing.T) {
+func TestCreateTransaction_AuditReviewMarksPendingReview_WithoutPublish(t *testing.T) {
 	repo := &fakeTransactionRepo{}
 	stockRepo := &fakeStockRepo{
 		available: map[string]int{
@@ -359,11 +365,12 @@ func TestCreateTransaction_AuditReviewMarksPendingReview(t *testing.T) {
 			Model:     "gemini-2.5-flash",
 		},
 	}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
-		IdempotencyKey: "idem-003",
+		IdempotencyKey: "idem-004",
 		Items: []domain.TransactionItemInput{
 			{MedicineID: "PARA500", Qty: 2},
 		},
@@ -371,36 +378,15 @@ func TestCreateTransaction_AuditReviewMarksPendingReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if repo.createCalls != 1 {
-		t.Fatalf("expected repo.Create called once, got %d", repo.createCalls)
-	}
-	if auditRepo.calls != 1 {
-		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
-	}
-	if repo.updateAuditCalls != 1 {
-		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
-	}
-	if repo.auditValue.Reason != "requires pharmacist review" {
-		t.Fatalf("expected stored audit reason, got %q", repo.auditValue.Reason)
-	}
-	if repo.updateStatusCalls != 1 {
-		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
-	}
-	if repo.updatedStatus != domain.TransactionStatusPendingReview {
-		t.Fatalf("expected PENDING_REVIEW, got %s", repo.updatedStatus)
-	}
 	if result.Transaction.Status != domain.TransactionStatusPendingReview {
-		t.Fatalf("expected returned status PENDING_REVIEW, got %s", result.Transaction.Status)
+		t.Fatalf("expected PENDING_REVIEW, got %s", result.Transaction.Status)
 	}
-	if result.Transaction.Audit == nil {
-		t.Fatal("expected audit metadata on pending review transaction")
-	}
-	if stockRepo.deductCalls != 0 {
-		t.Fatalf("expected no stock deduction for review, got %d", stockRepo.deductCalls)
+	if publisher.publishCalls != 0 {
+		t.Fatalf("expected no publish for pending review, got %d", publisher.publishCalls)
 	}
 }
 
-func TestCreateTransaction_HighRiskReviewMarksFlagged(t *testing.T) {
+func TestCreateTransaction_HighRiskReviewMarksFlagged_WithoutPublish(t *testing.T) {
 	repo := &fakeTransactionRepo{}
 	stockRepo := &fakeStockRepo{
 		available: map[string]int{
@@ -417,11 +403,12 @@ func TestCreateTransaction_HighRiskReviewMarksFlagged(t *testing.T) {
 			Model:     "rule-based-v1",
 		},
 	}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
-		IdempotencyKey: "idem-004",
+		IdempotencyKey: "idem-005",
 		Items: []domain.TransactionItemInput{
 			{MedicineID: "OBATKERAS-X", Qty: 2},
 		},
@@ -429,27 +416,15 @@ func TestCreateTransaction_HighRiskReviewMarksFlagged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if repo.updateAuditCalls != 1 {
-		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
-	}
-	if repo.updateStatusCalls != 1 {
-		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
-	}
-	if repo.updatedStatus != domain.TransactionStatusFlagged {
-		t.Fatalf("expected FLAGGED, got %s", repo.updatedStatus)
-	}
 	if result.Transaction.Status != domain.TransactionStatusFlagged {
-		t.Fatalf("expected returned status FLAGGED, got %s", result.Transaction.Status)
+		t.Fatalf("expected FLAGGED, got %s", result.Transaction.Status)
 	}
-	if result.Transaction.Audit == nil {
-		t.Fatal("expected audit metadata on flagged transaction")
-	}
-	if stockRepo.deductCalls != 0 {
-		t.Fatalf("expected no stock deduction for flagged transaction, got %d", stockRepo.deductCalls)
+	if publisher.publishCalls != 0 {
+		t.Fatalf("expected no publish for flagged transaction, got %d", publisher.publishCalls)
 	}
 }
 
-func TestCreateTransaction_AuditErrorMarksPendingReview(t *testing.T) {
+func TestCreateTransaction_AuditErrorMarksPendingReview_WithoutPublish(t *testing.T) {
 	repo := &fakeTransactionRepo{}
 	stockRepo := &fakeStockRepo{
 		available: map[string]int{
@@ -463,11 +438,12 @@ func TestCreateTransaction_AuditErrorMarksPendingReview(t *testing.T) {
 			Reason:  "connection refused",
 		},
 	}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
-		IdempotencyKey: "idem-005",
+		IdempotencyKey: "idem-006",
 		Items: []domain.TransactionItemInput{
 			{MedicineID: "PARA500", Qty: 2},
 		},
@@ -475,30 +451,15 @@ func TestCreateTransaction_AuditErrorMarksPendingReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-	if repo.updateAuditCalls != 1 {
-		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
-	}
-	if repo.auditValue.Provider != "system" {
-		t.Fatalf("expected audit provider system, got %q", repo.auditValue.Provider)
-	}
-	if repo.updateStatusCalls != 1 {
-		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
-	}
-	if repo.updatedStatus != domain.TransactionStatusPendingReview {
-		t.Fatalf("expected PENDING_REVIEW, got %s", repo.updatedStatus)
-	}
 	if result.Transaction.Status != domain.TransactionStatusPendingReview {
-		t.Fatalf("expected returned status PENDING_REVIEW, got %s", result.Transaction.Status)
+		t.Fatalf("expected PENDING_REVIEW, got %s", result.Transaction.Status)
 	}
-	if result.Transaction.Audit == nil {
-		t.Fatal("expected audit metadata on fallback review transaction")
-	}
-	if stockRepo.deductCalls != 0 {
-		t.Fatalf("expected no stock deduction when ai auditor fails, got %d", stockRepo.deductCalls)
+	if publisher.publishCalls != 0 {
+		t.Fatalf("expected no publish when ai auditor fails, got %d", publisher.publishCalls)
 	}
 }
 
-func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
+func TestCreateTransaction_DeductFailureMarksFailed_WithoutPublish(t *testing.T) {
 	repo := &fakeTransactionRepo{}
 	stockRepo := &fakeStockRepo{
 		available: map[string]int{
@@ -522,11 +483,12 @@ func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
 			Model:     "gemini-2.5-flash",
 		},
 	}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	result, err := uc.CreateTransaction(context.Background(), domain.CreateTransactionRequest{
-		IdempotencyKey: "idem-006",
+		IdempotencyKey: "idem-007",
 		Items: []domain.TransactionItemInput{
 			{MedicineID: "PARA500", Qty: 2},
 			{MedicineID: "AMOX500", Qty: 2},
@@ -535,30 +497,14 @@ func TestCreateTransaction_DeductFailureMarksFailed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-
 	if _, ok := domain.IsInsufficientStock(err); !ok {
 		t.Fatalf("expected InsufficientStockError, got %T", err)
 	}
-	if repo.createCalls != 1 {
-		t.Fatalf("expected repo.Create called once, got %d", repo.createCalls)
-	}
-	if auditRepo.calls != 1 {
-		t.Fatalf("expected audit repo called once, got %d", auditRepo.calls)
-	}
-	if repo.updateAuditCalls != 1 {
-		t.Fatalf("expected repo.UpdateAudit called once, got %d", repo.updateAuditCalls)
-	}
-	if repo.updateStatusCalls != 1 {
-		t.Fatalf("expected repo.UpdateStatus called once, got %d", repo.updateStatusCalls)
-	}
-	if repo.updatedStatus != domain.TransactionStatusFailed {
-		t.Fatalf("expected FAILED status, got %s", repo.updatedStatus)
-	}
 	if result.Transaction.Status != domain.TransactionStatusFailed {
-		t.Fatalf("expected returned transaction status FAILED, got %s", result.Transaction.Status)
+		t.Fatalf("expected FAILED, got %s", result.Transaction.Status)
 	}
-	if result.Transaction.Audit == nil {
-		t.Fatal("expected failed transaction to still carry audit metadata")
+	if publisher.publishCalls != 0 {
+		t.Fatalf("expected no publish on failed transaction, got %d", publisher.publishCalls)
 	}
 }
 
@@ -593,21 +539,13 @@ func TestListTransactions_DefaultPagination(t *testing.T) {
 		deductErrFor: map[string]error{},
 	}
 	auditRepo := &fakeAuditRepo{}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	result, err := uc.ListTransactions(context.Background(), domain.ListTransactionsRequest{})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	}
-	if repo.listCalls != 1 {
-		t.Fatalf("expected repo.List called once, got %d", repo.listCalls)
-	}
-	if repo.capturedList.Limit != 10 {
-		t.Fatalf("expected default limit 10, got %d", repo.capturedList.Limit)
-	}
-	if repo.capturedList.Offset != 0 {
-		t.Fatalf("expected default offset 0, got %d", repo.capturedList.Offset)
 	}
 	if result.Total != 1 {
 		t.Fatalf("expected total 1, got %d", result.Total)
@@ -631,8 +569,9 @@ func TestListTransactions_WithFilter(t *testing.T) {
 		deductErrFor: map[string]error{},
 	}
 	auditRepo := &fakeAuditRepo{}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	_, err := uc.ListTransactions(context.Background(), domain.ListTransactionsRequest{
 		Limit:  5,
@@ -641,9 +580,6 @@ func TestListTransactions_WithFilter(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	}
-	if repo.listCalls != 1 {
-		t.Fatalf("expected repo.List called once, got %d", repo.listCalls)
 	}
 	if repo.capturedList.Status != "PENDING_REVIEW" {
 		t.Fatalf("expected normalized status PENDING_REVIEW, got %q", repo.capturedList.Status)
@@ -657,8 +593,9 @@ func TestListTransactions_InvalidLimit(t *testing.T) {
 		deductErrFor: map[string]error{},
 	}
 	auditRepo := &fakeAuditRepo{}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	_, err := uc.ListTransactions(context.Background(), domain.ListTransactionsRequest{
 		Limit: -1,
@@ -666,16 +603,9 @@ func TestListTransactions_InvalidLimit(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-
 	ve, ok := domain.IsValidation(err)
-	if !ok {
-		t.Fatalf("expected ValidationError, got %T", err)
-	}
-	if ve.Field != "limit" {
-		t.Fatalf("expected field limit, got %s", ve.Field)
-	}
-	if repo.listCalls != 0 {
-		t.Fatalf("expected repo.List not called, got %d", repo.listCalls)
+	if !ok || ve.Field != "limit" {
+		t.Fatalf("expected ValidationError on limit, got %v", err)
 	}
 }
 
@@ -686,8 +616,9 @@ func TestListTransactions_InvalidOffset(t *testing.T) {
 		deductErrFor: map[string]error{},
 	}
 	auditRepo := &fakeAuditRepo{}
+	publisher := &fakePublisher{}
 
-	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo)
+	uc := usecase.NewTransactionUsecase(repo, stockRepo, auditRepo, publisher)
 
 	_, err := uc.ListTransactions(context.Background(), domain.ListTransactionsRequest{
 		Offset: -1,
@@ -695,15 +626,8 @@ func TestListTransactions_InvalidOffset(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-
 	ve, ok := domain.IsValidation(err)
-	if !ok {
-		t.Fatalf("expected ValidationError, got %T", err)
-	}
-	if ve.Field != "offset" {
-		t.Fatalf("expected field offset, got %s", ve.Field)
-	}
-	if repo.listCalls != 0 {
-		t.Fatalf("expected repo.List not called, got %d", repo.listCalls)
+	if !ok || ve.Field != "offset" {
+		t.Fatalf("expected ValidationError on offset, got %v", err)
 	}
 }

@@ -10,6 +10,11 @@ if ([string]::IsNullOrEmpty($env:INVENTORY_BASE_URL)) { $env:INVENTORY_BASE_URL 
 if ([string]::IsNullOrEmpty($env:AI_AUDITOR_BASE_URL)) { $env:AI_AUDITOR_BASE_URL = "http://localhost:8083" }
 if ([string]::IsNullOrEmpty($env:AI_AUDITOR_TIMEOUT_MS)) { $env:AI_AUDITOR_TIMEOUT_MS = "5000" }
 
+if ([string]::IsNullOrEmpty($env:RABBITMQ_URL)) { $env:RABBITMQ_URL = "amqp://finpharm:finpharm@localhost:5672/" }
+if ([string]::IsNullOrEmpty($env:RABBITMQ_EXCHANGE)) { $env:RABBITMQ_EXCHANGE = "finpharm.events" }
+if ([string]::IsNullOrEmpty($env:RABBITMQ_TRANSACTION_APPROVED_QUEUE)) { $env:RABBITMQ_TRANSACTION_APPROVED_QUEUE = "transaction.approved.queue" }
+if ([string]::IsNullOrEmpty($env:RABBITMQ_TRANSACTION_APPROVED_ROUTING_KEY)) { $env:RABBITMQ_TRANSACTION_APPROVED_ROUTING_KEY = "transaction.approved" }
+
 if ([string]::IsNullOrEmpty($env:DB_HOST)) { $env:DB_HOST = "127.0.0.1" }
 if ([string]::IsNullOrEmpty($env:DB_PORT)) { $env:DB_PORT = "55432" }
 if ([string]::IsNullOrEmpty($env:DB_USER)) { $env:DB_USER = "finpharm" }
