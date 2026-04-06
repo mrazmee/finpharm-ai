@@ -32,15 +32,12 @@ func main() {
 		}
 	}()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
 
+	runErrCh := make(chan error, 1)
 	go func() {
-		stop := make(chan os.Signal, 1)
-		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-		<-stop
-		slog.Info("worker_shutdown_signal")
-		cancel()
+		runErrCh <- consumerSvc.Run(workerCtx)
 	}()
 
 	slog.Info("worker_start",
@@ -49,12 +46,39 @@ func main() {
 		"exchange", cfg.RabbitMQExchange,
 		"routing_key", cfg.RoutingKey,
 		"consumer_tag", cfg.ConsumerTag,
+		"shutdown_timeout_ms", int(cfg.ShutdownTimeout.Milliseconds()),
 	)
 
-	if err := consumerSvc.Run(ctx); err != nil {
-		slog.Error("worker_run_failed", "error", err)
-		os.Exit(1)
-	}
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
-	slog.Info("worker_stopped")
+	select {
+	case sig := <-stop:
+		slog.Info("worker_shutdown_signal", "signal", sig.String())
+		workerCancel()
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer shutdownCancel()
+
+		select {
+		case err := <-runErrCh:
+			if err != nil {
+				slog.Error("worker_run_failed", "error", err)
+				os.Exit(1)
+			}
+			slog.Info("worker_stopped")
+		case <-shutdownCtx.Done():
+			slog.Error("worker_shutdown_timeout",
+				"shutdown_timeout_ms", int(cfg.ShutdownTimeout.Milliseconds()),
+			)
+			os.Exit(1)
+		}
+
+	case err := <-runErrCh:
+		if err != nil {
+			slog.Error("worker_run_failed", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("worker_stopped")
+	}
 }
