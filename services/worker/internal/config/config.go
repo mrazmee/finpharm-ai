@@ -7,15 +7,21 @@ import (
 )
 
 type Config struct {
-	AppEnv          string
-	WorkerName      string
-	RabbitMQURL     string
-	RabbitMQExchange string
-	QueueName       string
-	RoutingKey      string
-	ConsumerTag     string
-	PrefetchCount   int
-	ShutdownTimeout time.Duration
+	AppEnv              string
+	WorkerName          string
+	RabbitMQURL         string
+	RabbitMQExchange    string
+	QueueName           string
+	RoutingKey          string
+	RetryQueueName      string
+	RetryRoutingKey     string
+	DLQName             string
+	DLQRoutingKey       string
+	ConsumerTag         string
+	PrefetchCount       int
+	MaxRetryCount       int
+	RetryDelayMs        int
+	ShutdownTimeout     time.Duration
 }
 
 func Load() Config {
@@ -26,8 +32,14 @@ func Load() Config {
 		RabbitMQExchange: getEnv("RABBITMQ_EXCHANGE", "finpharm.events"),
 		QueueName:        getEnv("RABBITMQ_TRANSACTION_APPROVED_QUEUE", "transaction.approved.queue"),
 		RoutingKey:       getEnv("RABBITMQ_TRANSACTION_APPROVED_ROUTING_KEY", "transaction.approved"),
+		RetryQueueName:   getEnv("RABBITMQ_TRANSACTION_APPROVED_RETRY_QUEUE", "transaction.approved.retry.queue"),
+		RetryRoutingKey:  getEnv("RABBITMQ_TRANSACTION_APPROVED_RETRY_ROUTING_KEY", "transaction.approved.retry"),
+		DLQName:          getEnv("RABBITMQ_TRANSACTION_APPROVED_DLQ", "transaction.approved.dlq"),
+		DLQRoutingKey:    getEnv("RABBITMQ_TRANSACTION_APPROVED_DLQ_ROUTING_KEY", "transaction.approved.dlq"),
 		ConsumerTag:      getEnv("RABBITMQ_CONSUMER_TAG", "worker.transaction.approved"),
 		PrefetchCount:    getEnvInt("RABBITMQ_PREFETCH_COUNT", 10),
+		MaxRetryCount:    getEnvInt("RABBITMQ_MAX_RETRY_COUNT", 3),
+		RetryDelayMs:     getEnvInt("RABBITMQ_RETRY_DELAY_MS", 5000),
 		ShutdownTimeout:  time.Duration(getEnvInt("SHUTDOWN_TIMEOUT_MS", 7000)) * time.Millisecond,
 	}
 }

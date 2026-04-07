@@ -1,6 +1,10 @@
 package consumer
 
-import "testing"
+import (
+	"testing"
+
+	amqp "github.com/rabbitmq/amqp091-go"
+)
 
 func TestDecodeTransactionApprovedEvent_OK(t *testing.T) {
 	body := []byte(`{
@@ -41,5 +45,34 @@ func TestDecodeTransactionApprovedEvent_MissingTransactionID(t *testing.T) {
 	_, err := decodeTransactionApprovedEvent(body)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestCurrentRetryCount_DefaultZero(t *testing.T) {
+	got := currentRetryCount(nil)
+	if got != 0 {
+		t.Fatalf("expected 0, got %d", got)
+	}
+}
+
+func TestCurrentRetryCount_FromHeaders(t *testing.T) {
+	got := currentRetryCount(amqp.Table{
+		"x-retry-count": int32(2),
+	})
+	if got != 2 {
+		t.Fatalf("expected 2, got %d", got)
+	}
+}
+
+func TestWithRetryHeader(t *testing.T) {
+	headers := withRetryHeader(amqp.Table{
+		"foo": "bar",
+	}, 3)
+
+	if headers["foo"] != "bar" {
+		t.Fatalf("expected existing header preserved, got %v", headers["foo"])
+	}
+	if headers["x-retry-count"] != 3 {
+		t.Fatalf("expected retry header 3, got %v", headers["x-retry-count"])
 	}
 }

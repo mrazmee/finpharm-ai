@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	"finpharm-ai/services/worker/internal/config"
@@ -18,9 +19,10 @@ type TransactionApprovedHandler interface {
 }
 
 type TransactionApprovedConsumer struct {
-	cfg     config.Config
-	conn    *amqp.Connection
-	handler TransactionApprovedHandler
+	cfg            config.Config
+	conn           *amqp.Connection
+	handler        TransactionApprovedHandler
+	processedStore *InMemoryProcessedStore
 }
 
 func NewTransactionApprovedConsumer(cfg config.Config, handler TransactionApprovedHandler) (*TransactionApprovedConsumer, error) {
@@ -37,9 +39,10 @@ func NewTransactionApprovedConsumer(cfg config.Config, handler TransactionApprov
 	}
 
 	c := &TransactionApprovedConsumer{
-		cfg:     cfg,
-		conn:    conn,
-		handler: handler,
+		cfg:            cfg,
+		conn:           conn,
+		handler:        handler,
+		processedStore: NewInMemoryProcessedStore(),
 	}
 
 	if err := c.ensureTopology(); err != nil {
@@ -86,6 +89,9 @@ func (c *TransactionApprovedConsumer) Run(ctx context.Context) error {
 		"routing_key", c.cfg.RoutingKey,
 		"consumer_tag", c.cfg.ConsumerTag,
 		"prefetch_count", c.cfg.PrefetchCount,
+		"max_retry_count", c.cfg.MaxRetryCount,
+		"retry_queue", c.cfg.RetryQueueName,
+		"dlq", c.cfg.DLQName,
 	)
 
 	for {
@@ -100,26 +106,62 @@ func (c *TransactionApprovedConsumer) Run(ctx context.Context) error {
 
 			event, err := decodeTransactionApprovedEvent(delivery.Body)
 			if err != nil {
-				slog.Warn("worker_invalid_message_discarded",
+				slog.Warn("worker_invalid_message_to_dlq",
 					"queue", c.cfg.QueueName,
 					"error", err,
 				)
+				if dlqErr := c.publishToRoutingKey(ctx, c.cfg.DLQRoutingKey, delivery.Body, withRetryHeader(delivery.Headers, currentRetryCount(delivery.Headers))); dlqErr != nil {
+					return fmt.Errorf("publish invalid message to dlq: %w", dlqErr)
+				}
 				if ackErr := delivery.Ack(false); ackErr != nil {
 					return fmt.Errorf("ack invalid message: %w", ackErr)
 				}
 				continue
 			}
 
-			if err := c.handler.HandleTransactionApproved(ctx, event); err != nil {
-				slog.Warn("worker_process_failed_requeue",
+			if c.processedStore.Exists(event.TransactionID) {
+				slog.Info("worker_duplicate_skipped",
 					"transaction_id", event.TransactionID,
-					"error", err,
+					"queue", c.cfg.QueueName,
 				)
-				if nackErr := delivery.Nack(false, true); nackErr != nil {
-					return fmt.Errorf("nack failed message: %w", nackErr)
+				if ackErr := delivery.Ack(false); ackErr != nil {
+					return fmt.Errorf("ack duplicate message: %w", ackErr)
 				}
 				continue
 			}
+
+			if err := c.handler.HandleTransactionApproved(ctx, event); err != nil {
+				retryCount := currentRetryCount(delivery.Headers)
+				if retryCount >= c.cfg.MaxRetryCount {
+					slog.Warn("worker_process_failed_to_dlq",
+						"transaction_id", event.TransactionID,
+						"retry_count", retryCount,
+						"max_retry_count", c.cfg.MaxRetryCount,
+						"error", err,
+					)
+					if dlqErr := c.publishToRoutingKey(ctx, c.cfg.DLQRoutingKey, delivery.Body, withRetryHeader(delivery.Headers, retryCount)); dlqErr != nil {
+						return fmt.Errorf("publish failed message to dlq: %w", dlqErr)
+					}
+				} else {
+					nextRetry := retryCount + 1
+					slog.Warn("worker_process_failed_to_retry",
+						"transaction_id", event.TransactionID,
+						"retry_count", nextRetry,
+						"max_retry_count", c.cfg.MaxRetryCount,
+						"error", err,
+					)
+					if retryErr := c.publishToRoutingKey(ctx, c.cfg.RetryRoutingKey, delivery.Body, withRetryHeader(delivery.Headers, nextRetry)); retryErr != nil {
+						return fmt.Errorf("publish failed message to retry queue: %w", retryErr)
+					}
+				}
+
+				if ackErr := delivery.Ack(false); ackErr != nil {
+					return fmt.Errorf("ack failed message after reroute: %w", ackErr)
+				}
+				continue
+			}
+
+			c.processedStore.Mark(event.TransactionID)
 
 			if err := delivery.Ack(false); err != nil {
 				return fmt.Errorf("ack processed message: %w", err)
@@ -165,6 +207,30 @@ func (c *TransactionApprovedConsumer) ensureTopology() error {
 		return fmt.Errorf("declare queue %q: %w", c.cfg.QueueName, err)
 	}
 
+	_, err = ch.QueueDeclare(
+		c.cfg.RetryQueueName,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("declare retry queue %q: %w", c.cfg.RetryQueueName, err)
+	}
+
+	_, err = ch.QueueDeclare(
+		c.cfg.DLQName,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("declare dlq %q: %w", c.cfg.DLQName, err)
+	}
+
 	if err := ch.QueueBind(
 		c.cfg.QueueName,
 		c.cfg.RoutingKey,
@@ -172,15 +238,52 @@ func (c *TransactionApprovedConsumer) ensureTopology() error {
 		false,
 		nil,
 	); err != nil {
-		return fmt.Errorf("bind queue %q to exchange %q with routing key %q: %w",
-			c.cfg.QueueName,
-			c.cfg.RabbitMQExchange,
-			c.cfg.RoutingKey,
-			err,
-		)
+		return fmt.Errorf("bind queue %q: %w", c.cfg.QueueName, err)
+	}
+
+	if err := ch.QueueBind(
+		c.cfg.RetryQueueName,
+		c.cfg.RetryRoutingKey,
+		c.cfg.RabbitMQExchange,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("bind retry queue %q: %w", c.cfg.RetryQueueName, err)
+	}
+
+	if err := ch.QueueBind(
+		c.cfg.DLQName,
+		c.cfg.DLQRoutingKey,
+		c.cfg.RabbitMQExchange,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("bind dlq %q: %w", c.cfg.DLQName, err)
 	}
 
 	return nil
+}
+
+func (c *TransactionApprovedConsumer) publishToRoutingKey(ctx context.Context, routingKey string, body []byte, headers amqp.Table) error {
+	ch, err := c.conn.Channel()
+	if err != nil {
+		return fmt.Errorf("open rabbitmq channel for publish: %w", err)
+	}
+	defer ch.Close()
+
+	return ch.PublishWithContext(
+		ctx,
+		c.cfg.RabbitMQExchange,
+		routingKey,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			Body:         body,
+			Headers:      headers,
+		},
+	)
 }
 
 func decodeTransactionApprovedEvent(body []byte) (domain.TransactionApprovedEvent, error) {
@@ -195,4 +298,41 @@ func decodeTransactionApprovedEvent(body []byte) (domain.TransactionApprovedEven
 		return domain.TransactionApprovedEvent{}, fmt.Errorf("transaction_id is required")
 	}
 	return event, nil
+}
+
+func currentRetryCount(headers amqp.Table) int {
+	if headers == nil {
+		return 0
+	}
+
+	raw, ok := headers["x-retry-count"]
+	if !ok {
+		return 0
+	}
+
+	switch v := raw.(type) {
+	case int32:
+		return int(v)
+	case int64:
+		return int(v)
+	case int:
+		return v
+	case string:
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+func withRetryHeader(headers amqp.Table, retryCount int) amqp.Table {
+	out := amqp.Table{}
+	for k, v := range headers {
+		out[k] = v
+	}
+	out["x-retry-count"] = retryCount
+	return out
 }
