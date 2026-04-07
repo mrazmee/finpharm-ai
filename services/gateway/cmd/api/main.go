@@ -18,7 +18,6 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
-
 	router := httpapi.NewRouter(cfg)
 
 	srv := &http.Server{
@@ -32,12 +31,16 @@ func main() {
 	go func() {
 		slog.Info("server_start",
 			"port", cfg.Port,
+			"inventory_base_url", cfg.InventoryBaseURL,
+			"transaction_base_url", cfg.TransactionBaseURL,
+			"auth_enabled", cfg.AuthEnabled,
+			"jwt_issuer", cfg.JWTIssuer,
+			"jwt_expire_minutes", cfg.JWTExpireMinutes,
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),
-			"transaction_base_url", cfg.TransactionBaseURL,
-			"inventory_base_url", cfg.InventoryBaseURL,
 		)
+
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server_error", "error", err)
 			os.Exit(1)
@@ -54,7 +57,10 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("server_shutdown_error", "error", err, "shutdown_timeout_ms", int(cfg.ShutdownTimeout.Milliseconds()))
+		slog.Error("server_shutdown_error",
+			"error", err,
+			"shutdown_timeout_ms", int(cfg.ShutdownTimeout.Milliseconds()),
+		)
 		os.Exit(1)
 	}
 
