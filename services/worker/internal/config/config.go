@@ -7,21 +7,22 @@ import (
 )
 
 type Config struct {
-	AppEnv              string
-	WorkerName          string
-	RabbitMQURL         string
-	RabbitMQExchange    string
-	QueueName           string
-	RoutingKey          string
-	RetryQueueName      string
-	RetryRoutingKey     string
-	DLQName             string
-	DLQRoutingKey       string
-	ConsumerTag         string
-	PrefetchCount       int
-	MaxRetryCount       int
-	RetryDelayMs        int
-	ShutdownTimeout     time.Duration
+	AppEnv           string
+	WorkerName       string
+	RabbitMQURL      string
+	RabbitMQExchange string
+	QueueName        string
+	RoutingKey       string
+	RetryQueueName   string
+	RetryRoutingKey  string
+	DLQName          string
+	DLQRoutingKey    string
+	ConsumerTag      string
+	PrefetchCount    int
+	MaxRetryCount    int
+	RetryDelayMs     int
+	MetricsPort      string
+	ShutdownTimeout  time.Duration
 }
 
 func Load() Config {
@@ -40,6 +41,7 @@ func Load() Config {
 		PrefetchCount:    getEnvInt("RABBITMQ_PREFETCH_COUNT", 10),
 		MaxRetryCount:    getEnvInt("RABBITMQ_MAX_RETRY_COUNT", 3),
 		RetryDelayMs:     getEnvInt("RABBITMQ_RETRY_DELAY_MS", 5000),
+		MetricsPort:      getEnv("WORKER_METRICS_PORT", "9094"),
 		ShutdownTimeout:  time.Duration(getEnvInt("SHUTDOWN_TIMEOUT_MS", 7000)) * time.Millisecond,
 	}
 }

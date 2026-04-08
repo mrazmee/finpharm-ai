@@ -12,6 +12,7 @@ import (
 	"finpharm-ai/services/transaction/internal/config"
 	"finpharm-ai/services/transaction/internal/httpapi"
 	"finpharm-ai/services/transaction/internal/httpapi/handler"
+	"finpharm-ai/services/transaction/internal/observability"
 	"finpharm-ai/services/transaction/internal/repository"
 	"finpharm-ai/services/transaction/internal/usecase"
 
@@ -77,9 +78,13 @@ func main() {
 
 	router := httpapi.NewRouter(cfg, stockHandler, txHandler)
 
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", observability.MetricsHandler())
+	mux.Handle("/", observability.InstrumentHandler("transaction", router))
+
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      router,
+		Handler:      mux,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -94,6 +99,7 @@ func main() {
 			"rabbitmq_exchange", cfg.RabbitMQExchange,
 			"rabbitmq_transaction_approved_queue", cfg.RabbitMQTransactionApprovedQueue,
 			"rabbitmq_transaction_approved_routing_key", cfg.RabbitMQTransactionApprovedRouting,
+			"metrics_path", "/metrics",
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

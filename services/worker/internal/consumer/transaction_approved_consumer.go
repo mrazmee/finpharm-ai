@@ -10,6 +10,7 @@ import (
 
 	"finpharm-ai/services/worker/internal/config"
 	"finpharm-ai/services/worker/internal/domain"
+	"finpharm-ai/services/worker/internal/observability"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -104,18 +105,26 @@ func (c *TransactionApprovedConsumer) Run(ctx context.Context) error {
 				return fmt.Errorf("deliveries channel closed")
 			}
 
+			done := observability.BeginProcessing()
+
 			event, err := decodeTransactionApprovedEvent(delivery.Body)
 			if err != nil {
 				slog.Warn("worker_invalid_message_to_dlq",
 					"queue", c.cfg.QueueName,
 					"error", err,
 				)
+				observability.IncResult("invalid_dlq")
+
 				if dlqErr := c.publishToRoutingKey(ctx, c.cfg.DLQRoutingKey, delivery.Body, withRetryHeader(delivery.Headers, currentRetryCount(delivery.Headers))); dlqErr != nil {
+					done()
 					return fmt.Errorf("publish invalid message to dlq: %w", dlqErr)
 				}
 				if ackErr := delivery.Ack(false); ackErr != nil {
+					done()
 					return fmt.Errorf("ack invalid message: %w", ackErr)
 				}
+
+				done()
 				continue
 			}
 
@@ -124,9 +133,14 @@ func (c *TransactionApprovedConsumer) Run(ctx context.Context) error {
 					"transaction_id", event.TransactionID,
 					"queue", c.cfg.QueueName,
 				)
+				observability.IncResult("duplicate")
+
 				if ackErr := delivery.Ack(false); ackErr != nil {
+					done()
 					return fmt.Errorf("ack duplicate message: %w", ackErr)
 				}
+
+				done()
 				continue
 			}
 
@@ -139,7 +153,10 @@ func (c *TransactionApprovedConsumer) Run(ctx context.Context) error {
 						"max_retry_count", c.cfg.MaxRetryCount,
 						"error", err,
 					)
+					observability.IncResult("dlq")
+
 					if dlqErr := c.publishToRoutingKey(ctx, c.cfg.DLQRoutingKey, delivery.Body, withRetryHeader(delivery.Headers, retryCount)); dlqErr != nil {
+						done()
 						return fmt.Errorf("publish failed message to dlq: %w", dlqErr)
 					}
 				} else {
@@ -150,20 +167,28 @@ func (c *TransactionApprovedConsumer) Run(ctx context.Context) error {
 						"max_retry_count", c.cfg.MaxRetryCount,
 						"error", err,
 					)
+					observability.IncResult("retry")
+
 					if retryErr := c.publishToRoutingKey(ctx, c.cfg.RetryRoutingKey, delivery.Body, withRetryHeader(delivery.Headers, nextRetry)); retryErr != nil {
+						done()
 						return fmt.Errorf("publish failed message to retry queue: %w", retryErr)
 					}
 				}
 
 				if ackErr := delivery.Ack(false); ackErr != nil {
+					done()
 					return fmt.Errorf("ack failed message after reroute: %w", ackErr)
 				}
+
+				done()
 				continue
 			}
 
 			c.processedStore.Mark(event.TransactionID)
+			observability.IncResult("success")
 
 			if err := delivery.Ack(false); err != nil {
+				done()
 				return fmt.Errorf("ack processed message: %w", err)
 			}
 
@@ -172,6 +197,8 @@ func (c *TransactionApprovedConsumer) Run(ctx context.Context) error {
 				"event_name", event.EventName,
 				"queue", c.cfg.QueueName,
 			)
+
+			done()
 		}
 	}
 }

@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"finpharm-ai/services/inventory/internal/config"
 	"finpharm-ai/services/inventory/internal/domain"
 	"finpharm-ai/services/inventory/internal/httpapi"
 	"finpharm-ai/services/inventory/internal/httpapi/handler"
+	"finpharm-ai/services/inventory/internal/observability"
 	"finpharm-ai/services/inventory/internal/repository"
 	"finpharm-ai/services/inventory/internal/usecase"
 )
@@ -23,59 +25,47 @@ func main() {
 
 	cfg := config.Load()
 
-	var (
-		medicineRepo domain.MedicineRepository
-		stockRepo    domain.StockRepository
-		cleanup      = func() error { return nil }
-	)
+	var medicineRepo domain.MedicineRepository
+	var stockRepo domain.StockRepository
+	var closeDB func()
 
-	switch cfg.StorageDriver {
-	case "", "memory":
-		slog.Info("inventory_storage_selected", "storage_driver", "memory")
+	switch strings.ToLower(strings.TrimSpace(cfg.StorageDriver)) {
+	case "memory":
 		medicineRepo = repository.NewMedicineMemoryRepo()
 		stockRepo = repository.NewStockMemoryRepo()
-
-	case "postgres":
+		closeDB = func() {}
+	default:
 		db, err := repository.OpenPostgres(cfg.DBConnString())
 		if err != nil {
-			slog.Error("db_connect_error", "error", err, "db_name", cfg.DBName)
+			slog.Error("db_connect_error", "error", err)
 			os.Exit(1)
 		}
 
-		cleanup = db.Close
-
-		slog.Info("inventory_storage_selected",
-			"storage_driver", "postgres",
-			"db_name", cfg.DBName,
-			"db_host", cfg.DBHost,
-			"db_port", cfg.DBPort,
-		)
+		closeDB = func() {
+			_ = db.Close()
+		}
 
 		medicineRepo = repository.NewMedicineSQLXRepo(db)
 		stockRepo = repository.NewStockSQLXRepo(db)
-
-	default:
-		slog.Error("invalid_storage_driver", "storage_driver", cfg.StorageDriver)
-		os.Exit(1)
 	}
 
-	defer func() {
-		if err := cleanup(); err != nil {
-			slog.Error("resource_cleanup_error", "error", err)
-		}
-	}()
+	defer closeDB()
 
 	stockUC := usecase.NewStockUsecase(stockRepo)
+	medicineUC := usecase.NewMedicineUsecase(medicineRepo)
+
 	stockHandler := handler.NewStockHandler(stockUC)
+	medicineHandler := handler.NewMedicineHandler(medicineUC)
 
-	medUC := usecase.NewMedicineUsecase(medicineRepo)
-	medHandler := handler.NewMedicineHandler(medUC)
+	router := httpapi.NewRouter(cfg, stockHandler, medicineHandler)
 
-	router := httpapi.NewRouter(cfg, stockHandler, medHandler)
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", observability.MetricsHandler())
+	mux.Handle("/", observability.InstrumentHandler("inventory", router))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      router,
+		Handler:      mux,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -85,6 +75,7 @@ func main() {
 		slog.Info("server_start",
 			"port", cfg.Port,
 			"storage_driver", cfg.StorageDriver,
+			"metrics_path", "/metrics",
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),
@@ -105,7 +96,7 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("server_shutdown_error", "error", err)
+		slog.Error("server_shutdown_error", "error", err, "shutdown_timeout_ms", int(cfg.ShutdownTimeout.Milliseconds()))
 		os.Exit(1)
 	}
 

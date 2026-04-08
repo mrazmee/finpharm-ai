@@ -13,6 +13,7 @@ import (
 	"finpharm-ai/services/ai-auditor/internal/domain"
 	"finpharm-ai/services/ai-auditor/internal/httpapi"
 	"finpharm-ai/services/ai-auditor/internal/httpapi/handler"
+	"finpharm-ai/services/ai-auditor/internal/observability"
 	"finpharm-ai/services/ai-auditor/internal/provider"
 	"finpharm-ai/services/ai-auditor/internal/usecase"
 )
@@ -24,46 +25,37 @@ func main() {
 
 	cfg := config.Load()
 
-	var primaryProvider domain.AuditProvider
 	fallbackProvider := provider.NewSafeFallbackProvider(cfg.AuditFailOpen)
 
+	var primaryProvider domain.AuditProvider = fallbackProvider
+
 	switch strings.ToLower(strings.TrimSpace(cfg.AuditProvider)) {
-	case "mock":
+	case "gemini":
+		primaryProvider = provider.NewGeminiProvider(
+			cfg.GeminiAPIKey,
+			cfg.GeminiModel,
+			cfg.GeminiTimeout,
+		)
+	case "mock", "rule-based", "rule_based":
 		primaryProvider = provider.NewRuleBasedProvider()
-		slog.Info("audit_provider_selected",
-			"provider", "mock",
-			"model", "rule-based-v1",
-		)
-	case "", "gemini":
-		if strings.TrimSpace(cfg.GeminiAPIKey) == "" {
-			slog.Warn("audit_provider_fallback_startup",
-				"reason", "gemini api key missing",
-				"provider", "fallback",
-				"model", "safe-review-v1",
-			)
-		} else {
-			primaryProvider = provider.NewGeminiProvider(cfg.GeminiAPIKey, cfg.GeminiModel, cfg.GeminiTimeout)
-			slog.Info("audit_provider_selected",
-				"provider", "gemini",
-				"model", cfg.GeminiModel,
-				"timeout_ms", int(cfg.GeminiTimeout.Milliseconds()),
-			)
-		}
+	case "fallback":
+		primaryProvider = fallbackProvider
 	default:
-		slog.Warn("audit_provider_unknown",
-			"configured_provider", cfg.AuditProvider,
-			"provider", "fallback",
-			"model", "safe-review-v1",
-		)
+		primaryProvider = fallbackProvider
 	}
 
 	auditUC := usecase.NewAuditUsecase(primaryProvider, fallbackProvider)
 	auditHandler := handler.NewAuditHandler(auditUC)
+
 	router := httpapi.NewRouter(cfg, auditHandler)
+
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", observability.MetricsHandler())
+	mux.Handle("/", observability.InstrumentHandler("ai-auditor", router))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      router,
+		Handler:      mux,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -72,6 +64,9 @@ func main() {
 	go func() {
 		slog.Info("server_start",
 			"port", cfg.Port,
+			"audit_provider", cfg.AuditProvider,
+			"gemini_model", cfg.GeminiModel,
+			"metrics_path", "/metrics",
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

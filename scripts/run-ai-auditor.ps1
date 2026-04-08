@@ -14,6 +14,7 @@ if ([string]::IsNullOrEmpty($env:GEMINI_TIMEOUT_MS)) { $env:GEMINI_TIMEOUT_MS = 
 
 # Set your key in the current shell before running, for example:
 # $env:GEMINI_API_KEY = "YOUR_REAL_KEY"
+# $env:AUDIT_PROVIDER="mock"
 # Do not commit real keys to the repository.
 
 go run .\services\ai-auditor\cmd\api

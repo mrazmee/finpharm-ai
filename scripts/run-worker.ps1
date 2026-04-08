@@ -16,6 +16,7 @@ if ([string]::IsNullOrEmpty($env:RABBITMQ_PREFETCH_COUNT)) { $env:RABBITMQ_PREFE
 if ([string]::IsNullOrEmpty($env:RABBITMQ_MAX_RETRY_COUNT)) { $env:RABBITMQ_MAX_RETRY_COUNT = "3" }
 if ([string]::IsNullOrEmpty($env:RABBITMQ_RETRY_DELAY_MS)) { $env:RABBITMQ_RETRY_DELAY_MS = "5000" }
 
+if ([string]::IsNullOrEmpty($env:WORKER_METRICS_PORT)) { $env:WORKER_METRICS_PORT = "9094" }
 if ([string]::IsNullOrEmpty($env:SHUTDOWN_TIMEOUT_MS)) { $env:SHUTDOWN_TIMEOUT_MS = "7000" }
 
 go run .\services\worker\cmd\worker
