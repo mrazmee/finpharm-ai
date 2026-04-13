@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 
+	"finpharm-ai/internal/telemetry/audithttp"
+	"finpharm-ai/internal/telemetry/tracehttp"
 	"finpharm-ai/services/inventory/internal/config"
 	"finpharm-ai/services/inventory/internal/domain"
 	"finpharm-ai/services/inventory/internal/httpapi"
@@ -59,13 +61,15 @@ func main() {
 
 	router := httpapi.NewRouter(cfg, stockHandler, medicineHandler)
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", observability.MetricsHandler())
-	mux.Handle("/", observability.InstrumentHandler("inventory", router))
+	baseMux := http.NewServeMux()
+	baseMux.Handle("/metrics", observability.MetricsHandler())
+	baseMux.Handle("/", observability.InstrumentHandler("inventory", router))
+
+	appHandler := tracehttp.Handler("inventory", audithttp.Handler("inventory", baseMux))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      mux,
+		Handler:      appHandler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -76,6 +80,7 @@ func main() {
 			"port", cfg.Port,
 			"storage_driver", cfg.StorageDriver,
 			"metrics_path", "/metrics",
+			"trace_header", tracehttp.HeaderTraceID,
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

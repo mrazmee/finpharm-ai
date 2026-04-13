@@ -8,6 +8,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"finpharm-ai/internal/telemetry/audithttp"
+	"finpharm-ai/internal/telemetry/tracehttp"
 	"finpharm-ai/services/gateway/internal/config"
 	"finpharm-ai/services/gateway/internal/httpapi"
 	"finpharm-ai/services/gateway/internal/observability"
@@ -21,13 +23,15 @@ func main() {
 	cfg := config.Load()
 	router := httpapi.NewRouter(cfg)
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", observability.MetricsHandler())
-	mux.Handle("/", observability.InstrumentHandler("gateway", router))
+	baseMux := http.NewServeMux()
+	baseMux.Handle("/metrics", observability.MetricsHandler())
+	baseMux.Handle("/", observability.InstrumentHandler("gateway", router))
+
+	appHandler := tracehttp.Handler("gateway", audithttp.Handler("gateway", baseMux))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      mux,
+		Handler:      appHandler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -42,6 +46,7 @@ func main() {
 			"jwt_issuer", cfg.JWTIssuer,
 			"jwt_expire_minutes", cfg.JWTExpireMinutes,
 			"metrics_path", "/metrics",
+			"trace_header", tracehttp.HeaderTraceID,
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

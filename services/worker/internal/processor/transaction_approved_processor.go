@@ -47,14 +47,28 @@ func BuildDummyOutput(event domain.TransactionApprovedEvent) DummyOutput {
 }
 
 func (p *TransactionApprovedProcessor) HandleTransactionApproved(ctx context.Context, event domain.TransactionApprovedEvent) error {
+	_ = ctx
+
 	output := BuildDummyOutput(event)
 
 	auditProvider := ""
 	auditModel := ""
+	auditDecision := ""
 	if event.Audit != nil {
 		auditProvider = event.Audit.Provider
 		auditModel = event.Audit.Model
+		auditDecision = event.Audit.Decision
 	}
+
+	slog.Info("audit_domain_event",
+		"event", "transaction_approved_processed",
+		"transaction_id", event.TransactionID,
+		"idempotency_key", event.IdempotencyKey,
+		"status", event.Status,
+		"audit_decision", auditDecision,
+		"audit_provider", auditProvider,
+		"audit_model", auditModel,
+	)
 
 	slog.Info("worker_notification_sent",
 		"transaction_id", event.TransactionID,

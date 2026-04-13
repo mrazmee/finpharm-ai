@@ -9,6 +9,8 @@ import (
 	"strings"
 	"syscall"
 
+	"finpharm-ai/internal/telemetry/audithttp"
+	"finpharm-ai/internal/telemetry/tracehttp"
 	"finpharm-ai/services/ai-auditor/internal/config"
 	"finpharm-ai/services/ai-auditor/internal/domain"
 	"finpharm-ai/services/ai-auditor/internal/httpapi"
@@ -49,13 +51,15 @@ func main() {
 
 	router := httpapi.NewRouter(cfg, auditHandler)
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", observability.MetricsHandler())
-	mux.Handle("/", observability.InstrumentHandler("ai-auditor", router))
+	baseMux := http.NewServeMux()
+	baseMux.Handle("/metrics", observability.MetricsHandler())
+	baseMux.Handle("/", observability.InstrumentHandler("ai-auditor", router))
+
+	appHandler := tracehttp.Handler("ai-auditor", audithttp.Handler("ai-auditor", baseMux))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      mux,
+		Handler:      appHandler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -67,6 +71,7 @@ func main() {
 			"audit_provider", cfg.AuditProvider,
 			"gemini_model", cfg.GeminiModel,
 			"metrics_path", "/metrics",
+			"trace_header", tracehttp.HeaderTraceID,
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

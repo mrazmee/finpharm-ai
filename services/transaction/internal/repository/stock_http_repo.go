@@ -76,11 +76,10 @@ type invErrorResponse struct {
 }
 
 func (r *StockHTTPRepo) GetAvailableQty(ctx context.Context, medicineID string, requestedQty int) (int, error) {
-	rid := RequestIDFromContext(ctx)
-	return r.getAvailableQty(ctx, medicineID, requestedQty, rid)
+	return r.getAvailableQty(ctx, medicineID, requestedQty)
 }
 
-func (r *StockHTTPRepo) getAvailableQty(ctx context.Context, medicineID string, requestedQty int, requestID string) (int, error) {
+func (r *StockHTTPRepo) getAvailableQty(ctx context.Context, medicineID string, requestedQty int) (int, error) {
 	now := time.Now()
 	if !r.breaker.Allow(now) {
 		return 0, &domain.UpstreamError{Service: "inventory", Reason: "circuit breaker open"}
@@ -88,7 +87,7 @@ func (r *StockHTTPRepo) getAvailableQty(ctx context.Context, medicineID string, 
 
 	var lastErr error
 	for attempt := 0; attempt <= r.retries; attempt++ {
-		qty, err := r.callInventoryCheck(ctx, medicineID, requestedQty, requestID)
+		qty, err := r.callInventoryCheck(ctx, medicineID, requestedQty)
 		if err == nil {
 			r.breaker.OnSuccess(time.Now())
 			return qty, nil
@@ -120,14 +119,12 @@ func (r *StockHTTPRepo) getAvailableQty(ctx context.Context, medicineID string, 
 }
 
 func (r *StockHTTPRepo) DeductStock(ctx context.Context, medicineID string, qty int) error {
-	rid := RequestIDFromContext(ctx)
-
 	now := time.Now()
 	if !r.breaker.Allow(now) {
 		return &domain.UpstreamError{Service: "inventory", Reason: "circuit breaker open"}
 	}
 
-	err := r.callInventoryDeduct(ctx, medicineID, qty, rid)
+	err := r.callInventoryDeduct(ctx, medicineID, qty)
 	if err != nil {
 		if _, ok := domain.IsNotFound(err); ok {
 			r.breaker.OnSuccess(time.Now())
@@ -149,7 +146,7 @@ func (r *StockHTTPRepo) DeductStock(ctx context.Context, medicineID string, qty 
 	return nil
 }
 
-func (r *StockHTTPRepo) callInventoryCheck(ctx context.Context, medicineID string, requestedQty int, requestID string) (int, error) {
+func (r *StockHTTPRepo) callInventoryCheck(ctx context.Context, medicineID string, requestedQty int) (int, error) {
 	body, err := json.Marshal(invReq{MedicineID: medicineID, Qty: requestedQty})
 	if err != nil {
 		return 0, fmt.Errorf("marshal inventory request: %w", err)
@@ -166,9 +163,7 @@ func (r *StockHTTPRepo) callInventoryCheck(ctx context.Context, medicineID strin
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Caller-Service", "transaction")
-	if requestID != "" {
-		req.Header.Set("X-Request-ID", requestID)
-	}
+	applyCommonHeadersFromContext(callCtx, req)
 
 	resp, err := r.client.Do(req)
 	if err != nil {
@@ -188,7 +183,7 @@ func (r *StockHTTPRepo) callInventoryCheck(ctx context.Context, medicineID strin
 	return ok.Data.AvailableQty, nil
 }
 
-func (r *StockHTTPRepo) callInventoryDeduct(ctx context.Context, medicineID string, qty int, requestID string) error {
+func (r *StockHTTPRepo) callInventoryDeduct(ctx context.Context, medicineID string, qty int) error {
 	body, err := json.Marshal(invReq{MedicineID: medicineID, Qty: qty})
 	if err != nil {
 		return fmt.Errorf("marshal inventory request: %w", err)
@@ -205,9 +200,7 @@ func (r *StockHTTPRepo) callInventoryDeduct(ctx context.Context, medicineID stri
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Caller-Service", "transaction")
-	if requestID != "" {
-		req.Header.Set("X-Request-ID", requestID)
-	}
+	applyCommonHeadersFromContext(callCtx, req)
 
 	resp, err := r.client.Do(req)
 	if err != nil {

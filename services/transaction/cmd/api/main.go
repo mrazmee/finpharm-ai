@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"finpharm-ai/internal/telemetry/audithttp"
+	"finpharm-ai/internal/telemetry/tracehttp"
 	"finpharm-ai/services/transaction/internal/config"
 	"finpharm-ai/services/transaction/internal/httpapi"
 	"finpharm-ai/services/transaction/internal/httpapi/handler"
@@ -78,13 +80,15 @@ func main() {
 
 	router := httpapi.NewRouter(cfg, stockHandler, txHandler)
 
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", observability.MetricsHandler())
-	mux.Handle("/", observability.InstrumentHandler("transaction", router))
+	baseMux := http.NewServeMux()
+	baseMux.Handle("/metrics", observability.MetricsHandler())
+	baseMux.Handle("/", observability.InstrumentHandler("transaction", router))
+
+	appHandler := tracehttp.Handler("transaction", audithttp.Handler("transaction", baseMux))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      mux,
+		Handler:      appHandler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -100,6 +104,7 @@ func main() {
 			"rabbitmq_transaction_approved_queue", cfg.RabbitMQTransactionApprovedQueue,
 			"rabbitmq_transaction_approved_routing_key", cfg.RabbitMQTransactionApprovedRouting,
 			"metrics_path", "/metrics",
+			"trace_header", tracehttp.HeaderTraceID,
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

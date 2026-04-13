@@ -97,11 +97,7 @@ func (r *AIAuditorHTTPRepo) AuditTransaction(ctx context.Context, req domain.Aud
 
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Caller-Service", "transaction")
-
-	rid := RequestIDFromContext(ctx)
-	if rid != "" {
-		httpReq.Header.Set("X-Request-ID", rid)
-	}
+	applyCommonHeadersFromContext(callCtx, httpReq)
 
 	resp, err := r.client.Do(httpReq)
 	if err != nil {

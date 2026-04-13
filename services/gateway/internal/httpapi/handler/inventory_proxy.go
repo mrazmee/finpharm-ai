@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"finpharm-ai/services/gateway/internal/httpapi/middleware"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -39,11 +37,7 @@ func (h *InventoryProxyHandler) ListMedicines(c *gin.Context) {
 		return
 	}
 
-	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
-	rid, _ := ridVal.(string)
-	req.Header.Set(middleware.HeaderRequestID, rid)
-
-	req.Header.Set("X-Caller-Service", "gateway")
+	setProxyForwardHeaders(c, req)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
@@ -74,11 +68,7 @@ func (h *InventoryProxyHandler) GetMedicine(c *gin.Context) {
 		return
 	}
 
-	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
-	rid, _ := ridVal.(string)
-	req.Header.Set(middleware.HeaderRequestID, rid)
-
-	req.Header.Set("X-Caller-Service", "gateway")
+	setProxyForwardHeaders(c, req)
 
 	resp, err := h.client.Do(req)
 	if err != nil {

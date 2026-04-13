@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"finpharm-ai/services/gateway/internal/httpapi/middleware"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -104,11 +102,7 @@ func (h *TransactionProxyHandler) CreateTransaction(c *gin.Context) {
 
 	upReq.Header.Set("Content-Type", "application/json")
 	upReq.Header.Set(headerIdempotencyKey, idempotencyKey)
-
-	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
-	rid, _ := ridVal.(string)
-	upReq.Header.Set(middleware.HeaderRequestID, rid)
-	upReq.Header.Set("X-Caller-Service", "gateway")
+	setProxyForwardHeaders(c, upReq)
 
 	resp, err := h.client.Do(upReq)
 	if err != nil {
@@ -193,10 +187,7 @@ func (h *TransactionProxyHandler) ListTransactions(c *gin.Context) {
 		return
 	}
 
-	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
-	rid, _ := ridVal.(string)
-	upReq.Header.Set(middleware.HeaderRequestID, rid)
-	upReq.Header.Set("X-Caller-Service", "gateway")
+	setProxyForwardHeaders(c, upReq)
 
 	resp, err := h.client.Do(upReq)
 	if err != nil {
