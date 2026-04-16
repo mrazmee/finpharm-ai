@@ -1,13 +1,11 @@
 # Finpharm-AI Runbook
 
 ## Tujuan
-
-Dokumen singkat untuk menjalankan, mereset, dan mendemokan project secara lokal tanpa kebingungan.
+Dokumen operasional singkat untuk menjalankan, mereset, menguji, dan mendemokan project secara lokal tanpa kebingungan.
 
 ---
 
 ## Lokasi File Penting
-
 - `Makefile` → root project
 - `RUNBOOK.md` → root project
 - PowerShell scripts → `scripts/*.ps1`
@@ -16,7 +14,6 @@ Dokumen singkat untuk menjalankan, mereset, dan mendemokan project secara lokal 
 ---
 
 ## Catatan Developer Experience (DX)
-
 Project ini saat ini tetap menjadikan **PowerShell (`.ps1`) sebagai jalur utama**, karena environment utama pengembangan adalah Windows.
 
 Namun untuk memperbaiki developer experience dan membuat repo lebih reviewer-friendly, script operasional penting juga disediakan dalam versi `.sh`.
@@ -33,7 +30,6 @@ Jadi:
 ---
 
 ## Port Utama
-
 - Gateway: `http://localhost:8080`
 - Transaction Service: `http://localhost:8081`
 - Inventory Service: `http://localhost:8082`
@@ -45,9 +41,68 @@ Jadi:
 
 ---
 
-## Menjalankan Service
+## Default Local Credentials
 
-Buka terminal terpisah untuk masing-masing service.
+### PostgreSQL
+- user: `finpharm`
+- password: `finpharm`
+
+### RabbitMQ
+- user: `finpharm`
+- password: `finpharm`
+
+### Grafana
+- login default local: `admin` / `admin`
+
+**Catatan Penting:**
+- nilai di atas hanya untuk local/dev/demo
+- jangan dipakai untuk environment non-local
+- untuk gateway non-local, ganti `JWT_SECRET` dari default dev value
+
+---
+
+## Quick Start
+
+### 1. Jalankan PostgreSQL
+```powershell
+docker compose up -d postgres
+```
+
+### 2. Jalankan RabbitMQ
+```powershell
+.\scripts\rabbitmq-up.ps1
+```
+
+### 3. Jalankan migration
+```powershell
+.\scripts\migrate-inventory-up.ps1
+.\scripts\migrate-transaction-up.ps1
+```
+
+### 4. Jalankan service
+Buka terminal terpisah:
+```powershell
+.\scripts\run-inventory.ps1
+.\scripts\run-transaction.ps1
+.\scripts\run-ai-auditor.ps1
+.\scripts\run-gateway.ps1
+.\scripts\run-worker.ps1
+```
+
+### 5. Jalankan observability
+```powershell
+.\scripts\run-prometheus.ps1
+.\scripts\run-grafana.ps1
+```
+
+### 6. Jalankan demo readiness
+```powershell
+.\scripts\demo-readiness.ps1
+```
+
+---
+
+## Menjalankan Service
 
 ### PowerShell
 ```powershell
@@ -150,14 +205,14 @@ Gunakan saat ingin membersihkan data transaksi tanpa mengubah stock medicines.
 ```
 
 **Catatan Penting:**
-- Script ini hanya membersihkan data transaksi.
-- Yang dibersihkan biasanya: `transactions` dan `transaction_items`.
-- Script ini **tidak mereset stock inventory**.
-- Data stock / medicines tetap dikelola oleh boundary `Inventory Service`.
+- script ini hanya membersihkan data transaksi
+- yang dibersihkan biasanya: `transactions` dan `transaction_items`
+- script ini **tidak mereset stock inventory**
+- stock tetap dikelola oleh Inventory Service
 
 ---
 
-## Generate Traffic Untuk Observability
+## Generate Traffic untuk Observability
 
 **PowerShell:**
 ```powershell
@@ -168,6 +223,12 @@ Gunakan saat ingin membersihkan data transaksi tanpa mengubah stock medicines.
 ```bash
 ./scripts/generate-traffic.sh
 ```
+
+Gunakan script ini untuk:
+- menaikkan HTTP traffic dashboard
+- memunculkan transaction outcomes
+- memunculkan AI auditor request count
+- memunculkan worker activity
 
 ---
 
@@ -183,14 +244,20 @@ Gunakan saat ingin membersihkan data transaksi tanpa mengubah stock medicines.
 ./scripts/demo-readiness.sh
 ```
 
+Checklist ini membantu memastikan:
+- semua service sudah hidup
+- observability stack sudah hidup
+- token demo sudah siap
+- dashboard siap dipresentasikan
+
 ---
 
 ## Migration Helper
 
 **Catatan:**
-- Script `.sh` migration memakai CLI `migrate`.
-- DSN database diambil dari environment variable.
-- Ini sengaja aman supaya tidak mengasumsikan DSN lokal yang salah.
+- script `.sh` migration memakai CLI `migrate`
+- DSN database diambil dari environment variable
+- ini sengaja aman supaya tidak mengasumsikan DSN lokal yang salah
 
 ### Inventory
 **PowerShell:**
@@ -198,7 +265,6 @@ Gunakan saat ingin membersihkan data transaksi tanpa mengubah stock medicines.
 .\scripts\migrate-inventory-up.ps1
 .\scripts\migrate-inventory-down.ps1
 ```
-
 **Shell:**
 ```bash
 export INVENTORY_DB_DSN="postgres://user:pass@localhost:5432/inventory_db?sslmode=disable"
@@ -212,7 +278,6 @@ export INVENTORY_DB_DSN="postgres://user:pass@localhost:5432/inventory_db?sslmod
 .\scripts\migrate-transaction-up.ps1
 .\scripts\migrate-transaction-down.ps1
 ```
-
 **Shell:**
 ```bash
 export TRANSACTION_DB_DSN="postgres://user:pass@localhost:5432/transaction_db?sslmode=disable"
@@ -228,60 +293,103 @@ Jika environment punya `make`, kamu bisa pakai wrapper command berikut:
 
 ```makefile
 make help
+make run-rabbitmq
 make run-prometheus
 make run-grafana
-make reset-transaction-data
-make demo-check
+make demo-readiness
+make demo-traffic
+make test
 ```
 
 **Catatan:**
-- Di repo ini `Makefile` tetap memanggil PowerShell, karena environment utama project adalah Windows.
-- Tujuan `Makefile` adalah merapikan command, bukan menggantikan `.ps1`.
+- Makefile di repo ini tetap memanggil PowerShell
+- tujuan Makefile adalah merapikan command, bukan menggantikan `.ps1`
 
 ---
 
 ## Catatan Makefile di Windows
 
-`Makefile` di repo ini ditambahkan untuk merapikan command dan memberi entry point yang lebih enak untuk reviewer.
-
+Makefile di repo ini ditambahkan untuk merapikan command dan memberi entry point yang lebih enak untuk reviewer.
 Namun perlu dicatat:
-- Environment utama project tetap Windows + PowerShell.
-- Target `Makefile` saat ini memanggil command PowerShell.
-- Output `make help` bisa sedikit berbeda tergantung implementasi `make` yang terpasang di Windows.
+- environment utama project tetap Windows + PowerShell
+- target Makefile saat ini memanggil command PowerShell
+- output `make help` bisa sedikit berbeda tergantung implementasi `make` yang terpasang di Windows
 
 **Contoh:**
-- Beberapa implementasi `make` bisa menampilkan output `echo` dengan tanda kutip.
-- Itu **bukan bug pada repo**, hanya perbedaan perilaku tool `make`.
+- beberapa implementasi `make` bisa menampilkan output `echo` dengan tanda kutip
+- itu **bukan bug pada repo**, hanya perbedaan perilaku tool `make`
 
-**Jadi:**
-- `Makefile` tetap berguna sebagai wrapper command.
-- Tetapi jalur utama yang paling stabil di Windows tetap `scripts/*.ps1`.
+Jadi:
+- Makefile tetap berguna sebagai wrapper command
+- tetapi jalur utama yang paling stabil di Windows tetap `scripts/*.ps1`
 
 ---
 
-## Demo Flow Yang Direkomendasikan
+## Demo Flow Final yang Direkomendasikan
 
-### 1. Issue Token Staff
+### 1. Persiapan
+- jalankan PostgreSQL
+- jalankan RabbitMQ
+- jalankan migrations
+- jalankan semua service
+- jalankan Prometheus dan Grafana
+- jalankan `.\scripts\demo-readiness.ps1`
+
+### 2. Flow Inti
+- issue token staff
+- issue token supervisor
+- cek medicines
+- cek stock
+- create transaction approved
+- create transaction pending_review / flagged
+- replay request dengan idempotency key yang sama
+- list transactions
+
+### 3. Flow Observability
+- buka Prometheus targets
+- buka dashboard Grafana
+- jalankan `.\scripts\generate-traffic.ps1`
+- tunjukkan:
+  - HTTP traffic
+  - latency
+  - transaction outcomes
+  - audit decisions
+  - worker metrics
+  - fallback total
+  - 4xx/5xx panel bila perlu
+
+### 4. Flow Error Demo (Opsional)
+Gunakan untuk memunculkan panel error:
+- unauthorized request → 401
+- invalid limit → 400
+- missing idempotency key → 400
+- rate limit → 429
+
+---
+
+## Example Demo Requests
+
+**Issue Token Staff**
 ```cmd
 curl -i -X POST http://localhost:8080/v1/auth/token ^
   -H "Content-Type: application/json" ^
   -d "{\"user_id\":\"staff-001\",\"role\":\"staff\"}"
 ```
 
-### 2. Issue Token Supervisor
+**Issue Token Supervisor**
 ```cmd
 curl -i -X POST http://localhost:8080/v1/auth/token ^
   -H "Content-Type: application/json" ^
   -d "{\"user_id\":\"supervisor-001\",\"role\":\"supervisor\"}"
 ```
 
-### 3. Cek Medicines
+**Cek Medicines**
 ```cmd
 curl -i "http://localhost:8080/v1/medicines?limit=2&offset=0" ^
   -H "Authorization: Bearer <STAFF_TOKEN>"
 ```
 
-### 4. Cek Stock
+**Cek Stock**
 ```cmd
 curl -i -X POST http://localhost:8080/v1/stock/check ^
   -H "Authorization: Bearer <STAFF_TOKEN>" ^
@@ -289,7 +397,7 @@ curl -i -X POST http://localhost:8080/v1/stock/check ^
   -d "{\"medicine_id\":\"PARA500\",\"qty\":1}"
 ```
 
-### 5. Create Transaction
+**Create Transaction**
 ```cmd
 curl -i -X POST http://localhost:8080/v1/transactions ^
   -H "Authorization: Bearer <STAFF_TOKEN>" ^
@@ -298,7 +406,16 @@ curl -i -X POST http://localhost:8080/v1/transactions ^
   -d "{\"items\":[{\"medicine_id\":\"PARA500\",\"qty\":1}]}"
 ```
 
-### 6. List Transactions
+**Replay Request Sama**
+```cmd
+curl -i -X POST http://localhost:8080/v1/transactions ^
+  -H "Authorization: Bearer <STAFF_TOKEN>" ^
+  -H "Content-Type: application/json" ^
+  -H "Idempotency-Key: idem-demo-001" ^
+  -d "{\"items\":[{\"medicine_id\":\"PARA500\",\"qty\":1}]}"
+```
+
+**List Transactions**
 ```cmd
 curl -i "http://localhost:8080/v1/transactions?limit=5&offset=0" ^
   -H "Authorization: Bearer <SUPERVISOR_TOKEN>"
@@ -309,48 +426,55 @@ curl -i "http://localhost:8080/v1/transactions?limit=5&offset=0" ^
 ## Observability Check
 
 ### Prometheus
-- Buka `http://localhost:9090/targets`
-- Pastikan semua target `UP`
+- buka `http://localhost:9090/targets`
+- pastikan semua target `UP`
 
 ### Grafana
-- Buka `http://localhost:3000`
-- Login default: `admin` / `admin`
-- Buka dashboard: **Finpharm Overview**
+- buka `http://localhost:3000`
+- login default local: `admin` / `admin`
+- buka dashboard: **Finpharm Overview**
 
 ---
 
 ## Catatan Demo Penting
 
-- Gunakan idempotency key yang berbeda untuk transaksi baru.
-- Replay dengan idempotency key yang sama tidak membuat event baru.
-- Worker metric hanya naik jika benar-benar ada event baru.
-- DLQ yang berisi message lama tidak otomatis berarti bug aktif saat ini.
-- Dashboard Grafana JSON **harus berada di folder**: `observability/grafana/dashboards/`
-- Bukan di: `observability/grafana/provisioning/dashboards/`
+- gunakan idempotency key yang berbeda untuk transaksi baru
+- replay dengan idempotency key yang sama tidak membuat event baru
+- worker metric hanya naik jika benar-benar ada event baru
+- DLQ yang berisi message lama tidak otomatis berarti bug aktif saat ini
+- dashboard Grafana JSON **harus berada di folder**: `observability/grafana/dashboards/`
+- bukan di: `observability/grafana/provisioning/dashboards/`
 
 ---
 
 ## Troubleshooting Singkat
 
 **Metrics HTTP Tidak Muncul**
-- Generate traffic dulu
-- Lalu refresh Prometheus / Grafana
+- generate traffic dulu
+- lalu refresh Prometheus / Grafana
+
+**Panel 4xx/5xx Kosong**
+- generate error runtime:
+  - unauthorized 401
+  - invalid request 400
+  - rate limit 429
+- tunggu scrape Prometheus
+- refresh Grafana
 
 **Worker Metrics Kosong**
-- Pastikan worker hidup
-- Kirim transaksi baru dengan idempotency key baru
-- Cek worker log
+- pastikan worker hidup
+- kirim transaksi baru dengan idempotency key baru
+- cek worker log
 
 **Grafana Folder Muncul Tapi Dashboard Kosong**
-- Pastikan JSON dashboard ada di folder: `observability/grafana/dashboards/`
-- Bukan di folder provisioning dashboards
+- pastikan JSON dashboard ada di: `observability/grafana/dashboards/`
+- bukan di folder provisioning dashboards
 
 **Script `.sh` Gagal Dieksekusi**
-Jalankan perintah ini terlebih dahulu:
 ```bash
 chmod +x ./scripts/*.sh
 ```
 
 **Migration `.sh` Gagal**
-- Pastikan CLI `migrate` terpasang
-- Pastikan env var DSN sudah di-set
+- pastikan CLI `migrate` terpasang
+- pastikan env var DSN sudah di-set
