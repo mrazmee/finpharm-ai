@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"finpharm-ai/services/transaction/internal/domain"
+	"finpharm-ai/services/transaction/internal/observability"
 )
 
 const flaggedRiskThreshold = 0.85
@@ -55,6 +56,7 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 		return domain.CreateTransactionResult{}, err
 	}
 	if found {
+		observability.IncTransactionReplay()
 		return domain.CreateTransactionResult{
 			Transaction: existing,
 			IsReplay:    true,
@@ -121,6 +123,7 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 		return domain.CreateTransactionResult{}, err
 	}
 	if createResult.IsReplay {
+		observability.IncTransactionReplay()
 		return createResult, nil
 	}
 
@@ -195,6 +198,10 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 			}
 			tx.Status = domain.TransactionStatusFailed
 			tx.Audit = &audit
+
+			observability.ObserveTransactionOutcome(string(tx.Status))
+			observability.ObserveTransactionAuditDecision(string(audit.Decision), audit.Provider, audit.Model)
+
 			return domain.CreateTransactionResult{
 				Transaction: tx,
 				IsReplay:    false,
@@ -208,6 +215,9 @@ func (u *TransactionUsecase) CreateTransaction(ctx context.Context, req domain.C
 
 	tx.Status = domain.TransactionStatusApproved
 	tx.Audit = &audit
+
+	observability.ObserveTransactionOutcome(string(tx.Status))
+	observability.ObserveTransactionAuditDecision(string(audit.Decision), audit.Provider, audit.Model)
 
 	u.publishApprovedEvent(ctx, tx)
 
@@ -265,6 +275,10 @@ func (u *TransactionUsecase) markReviewStatus(ctx context.Context, tx domain.Tra
 	}
 	tx.Status = status
 	tx.Audit = &audit
+
+	observability.ObserveTransactionOutcome(string(tx.Status))
+	observability.ObserveTransactionAuditDecision(string(audit.Decision), audit.Provider, audit.Model)
+
 	return domain.CreateTransactionResult{
 		Transaction: tx,
 		IsReplay:    false,

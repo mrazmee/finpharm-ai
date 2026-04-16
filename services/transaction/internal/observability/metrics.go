@@ -3,6 +3,7 @@ package observability
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +35,29 @@ var (
 			Help: "Current number of in-flight HTTP requests.",
 		},
 		[]string{"service"},
+	)
+
+	transactionOutcomesTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "finpharm_transaction_outcomes_total",
+			Help: "Total transaction outcomes by final status.",
+		},
+		[]string{"status"},
+	)
+
+	transactionAuditDecisionsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "finpharm_transaction_audit_decisions_total",
+			Help: "Total transaction audit decisions by decision/provider/model.",
+		},
+		[]string{"decision", "provider", "model"},
+	)
+
+	transactionReplaysTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "finpharm_transaction_replays_total",
+			Help: "Total replayed create transaction requests due to idempotency key reuse.",
+		},
 	)
 )
 
@@ -70,4 +94,28 @@ func InstrumentHandler(service string, next http.Handler) http.Handler {
 		httpRequestsTotal.WithLabelValues(service, r.Method, path, status).Inc()
 		httpRequestDuration.WithLabelValues(service, r.Method, path, status).Observe(time.Since(start).Seconds())
 	})
+}
+
+func ObserveTransactionOutcome(status string) {
+	transactionOutcomesTotal.WithLabelValues(normalizeLabel(status, "UNKNOWN")).Inc()
+}
+
+func ObserveTransactionAuditDecision(decision, provider, model string) {
+	transactionAuditDecisionsTotal.WithLabelValues(
+		normalizeLabel(decision, "UNKNOWN"),
+		normalizeLabel(provider, "unknown"),
+		normalizeLabel(model, "unknown"),
+	).Inc()
+}
+
+func IncTransactionReplay() {
+	transactionReplaysTotal.Inc()
+}
+
+func normalizeLabel(v string, fallback string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fallback
+	}
+	return strings.ToUpper(v)
 }

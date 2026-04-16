@@ -3,6 +3,7 @@ package observability
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +35,22 @@ var (
 			Help: "Current number of in-flight HTTP requests.",
 		},
 		[]string{"service"},
+	)
+
+	auditDecisionsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "finpharm_ai_auditor_decisions_total",
+			Help: "Total AI auditor decisions by decision/provider/model.",
+		},
+		[]string{"decision", "provider", "model"},
+	)
+
+	auditFallbacksTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "finpharm_ai_auditor_fallback_total",
+			Help: "Total AI auditor fallbacks by reason.",
+		},
+		[]string{"reason"},
 	)
 )
 
@@ -70,4 +87,24 @@ func InstrumentHandler(service string, next http.Handler) http.Handler {
 		httpRequestsTotal.WithLabelValues(service, r.Method, path, status).Inc()
 		httpRequestDuration.WithLabelValues(service, r.Method, path, status).Observe(time.Since(start).Seconds())
 	})
+}
+
+func ObserveAuditDecision(decision, provider, model string) {
+	auditDecisionsTotal.WithLabelValues(
+		normalizeLabel(decision, "UNKNOWN"),
+		normalizeLabel(provider, "unknown"),
+		normalizeLabel(model, "unknown"),
+	).Inc()
+}
+
+func IncFallback(reason string) {
+	auditFallbacksTotal.WithLabelValues(normalizeLabel(reason, "unknown")).Inc()
+}
+
+func normalizeLabel(v string, fallback string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fallback
+	}
+	return strings.ToUpper(v)
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"finpharm-ai/services/ai-auditor/internal/domain"
+	"finpharm-ai/services/ai-auditor/internal/observability"
 )
 
 type AuditUsecase struct {
@@ -50,11 +51,18 @@ func (u *AuditUsecase) AuditTransaction(ctx context.Context, req domain.AuditTra
 	}
 
 	if u.primary == nil {
-		return u.fallback.AuditTransaction(ctx, req)
+		observability.IncFallback("primary_missing")
+
+		result, err := u.fallback.AuditTransaction(ctx, req)
+		if err == nil {
+			observability.ObserveAuditDecision(string(result.Decision), result.Provider, result.Model)
+		}
+		return result, err
 	}
 
 	result, err := u.primary.AuditTransaction(ctx, req)
 	if err == nil {
+		observability.ObserveAuditDecision(string(result.Decision), result.Provider, result.Model)
 		return result, nil
 	}
 
@@ -63,7 +71,13 @@ func (u *AuditUsecase) AuditTransaction(ctx context.Context, req domain.AuditTra
 		"reason", err.Error(),
 	)
 
-	return u.fallback.AuditTransaction(ctx, req)
+	observability.IncFallback("primary_failed")
+
+	fallbackResult, fallbackErr := u.fallback.AuditTransaction(ctx, req)
+	if fallbackErr == nil {
+		observability.ObserveAuditDecision(string(fallbackResult.Decision), fallbackResult.Provider, fallbackResult.Model)
+	}
+	return fallbackResult, fallbackErr
 }
 
 func itoa(i int) string {
