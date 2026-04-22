@@ -26,6 +26,10 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		slog.Error("config_invalid", "error", err)
+		os.Exit(1)
+	}
 
 	fallbackProvider := provider.NewSafeFallbackProvider(cfg.AuditFailOpen)
 
@@ -53,7 +57,7 @@ func main() {
 
 	baseMux := http.NewServeMux()
 	baseMux.Handle("/metrics", observability.MetricsHandler())
-	baseMux.Handle("/", observability.InstrumentHandler("ai-auditor", router))
+	baseMux.Handle("/", router)
 
 	appHandler := tracehttp.Handler("ai-auditor", audithttp.Handler("ai-auditor", baseMux))
 

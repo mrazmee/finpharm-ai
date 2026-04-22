@@ -8,6 +8,7 @@ import (
 	"finpharm-ai/services/gateway/internal/config"
 	"finpharm-ai/services/gateway/internal/httpapi/handler"
 	"finpharm-ai/services/gateway/internal/httpapi/middleware"
+	"finpharm-ai/services/gateway/internal/observability"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,9 +24,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	authHandler := handler.NewAuthHandler(cfg)
 
 	router := gin.New()
-	router.Use(gin.Recovery())
-	router.Use(gin.Logger())
-	router.Use(middleware.RequestID())
+	router.Use(middleware.RequestID(), gin.Logger(), observability.Middleware("gateway"), gin.Recovery())
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

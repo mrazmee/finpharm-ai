@@ -4,6 +4,7 @@ import (
 	"finpharm-ai/services/ai-auditor/internal/config"
 	"finpharm-ai/services/ai-auditor/internal/httpapi/handler"
 	"finpharm-ai/services/ai-auditor/internal/httpapi/middleware"
+	"finpharm-ai/services/ai-auditor/internal/observability"
 
 	"github.com/gin-gonic/gin"
 )
@@ -12,7 +13,7 @@ func NewRouter(cfg config.Config, auditHandler *handler.AuditHandler) *gin.Engin
 	_ = cfg
 
 	r := gin.New()
-	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
+	r.Use(middleware.RequestID(), middleware.RequestLogger(), observability.Middleware("ai-auditor"), gin.Recovery())
 
 	health := handler.NewHealthHandler()
 

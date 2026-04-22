@@ -26,6 +26,10 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		slog.Error("config_invalid", "error", err)
+		os.Exit(1)
+	}
 
 	var medicineRepo domain.MedicineRepository
 	var stockRepo domain.StockRepository
@@ -63,7 +67,7 @@ func main() {
 
 	baseMux := http.NewServeMux()
 	baseMux.Handle("/metrics", observability.MetricsHandler())
-	baseMux.Handle("/", observability.InstrumentHandler("inventory", router))
+	baseMux.Handle("/", router)
 
 	appHandler := tracehttp.Handler("inventory", audithttp.Handler("inventory", baseMux))
 

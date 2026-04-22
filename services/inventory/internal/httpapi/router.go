@@ -4,6 +4,7 @@ import (
 	"finpharm-ai/services/inventory/internal/config"
 	"finpharm-ai/services/inventory/internal/httpapi/handler"
 	"finpharm-ai/services/inventory/internal/httpapi/middleware"
+	"finpharm-ai/services/inventory/internal/observability"
 
 	"github.com/gin-gonic/gin"
 )
@@ -16,7 +17,7 @@ func NewRouter(
 	_ = cfg
 
 	r := gin.New()
-	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
+	r.Use(middleware.RequestID(), middleware.RequestLogger(), observability.Middleware("inventory"), gin.Recovery())
 
 	health := handler.NewHealthHandler()
 

@@ -20,6 +20,10 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		slog.Error("config_invalid", "error", err)
+		os.Exit(1)
+	}
 
 	handler := processor.NewTransactionApprovedProcessor()
 

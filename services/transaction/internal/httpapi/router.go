@@ -4,13 +4,14 @@ import (
 	"finpharm-ai/services/transaction/internal/config"
 	"finpharm-ai/services/transaction/internal/httpapi/handler"
 	"finpharm-ai/services/transaction/internal/httpapi/middleware"
+	"finpharm-ai/services/transaction/internal/observability"
 
 	"github.com/gin-gonic/gin"
 )
 
 func NewRouter(cfg config.Config, stockHandler *handler.StockHandler, transactionHandler *handler.TransactionHandler) *gin.Engine {
 	r := gin.New()
-	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
+	r.Use(middleware.RequestID(), middleware.RequestLogger(), observability.Middleware("transaction"), gin.Recovery())
 
 	health := handler.NewHealthHandler()
 

@@ -2,12 +2,15 @@ package observability
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+var workerDurationBuckets = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10}
 
 var (
 	workerEventsTotal = promauto.NewCounterVec(
@@ -22,7 +25,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "finpharm_worker_processing_duration_seconds",
 			Help:    "Duration of worker message processing.",
-			Buckets: prometheus.DefBuckets,
+			Buckets: workerDurationBuckets,
 		},
 	)
 
@@ -49,5 +52,13 @@ func BeginProcessing() func() {
 }
 
 func IncResult(result string) {
-	workerEventsTotal.WithLabelValues(result).Inc()
+	workerEventsTotal.WithLabelValues(normalizeResult(result)).Inc()
+}
+
+func normalizeResult(result string) string {
+	result = strings.ToLower(strings.TrimSpace(result))
+	if result == "" {
+		return "unknown"
+	}
+	return result
 }

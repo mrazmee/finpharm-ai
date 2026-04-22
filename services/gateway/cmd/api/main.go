@@ -38,7 +38,7 @@ func main() {
 
 	baseMux := http.NewServeMux()
 	baseMux.Handle("/metrics", observability.MetricsHandler())
-	baseMux.Handle("/", observability.InstrumentHandler("gateway", appRouter))
+	baseMux.Handle("/", appRouter)
 
 	appHandler := tracehttp.Handler("gateway", audithttp.Handler("gateway", baseMux))
 

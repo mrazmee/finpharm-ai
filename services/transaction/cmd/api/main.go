@@ -28,6 +28,10 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		slog.Error("config_invalid", "error", err)
+		os.Exit(1)
+	}
 
 	db, err := sqlx.Connect("postgres", cfg.DSN())
 	if err != nil {
@@ -82,7 +86,7 @@ func main() {
 
 	baseMux := http.NewServeMux()
 	baseMux.Handle("/metrics", observability.MetricsHandler())
-	baseMux.Handle("/", observability.InstrumentHandler("transaction", router))
+	baseMux.Handle("/", router)
 
 	appHandler := tracehttp.Handler("transaction", audithttp.Handler("transaction", baseMux))
 

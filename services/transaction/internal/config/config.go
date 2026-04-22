@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -68,6 +69,77 @@ func Load() Config {
 	}
 }
 
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.Port) == "" {
+		return errConfig("PORT is required")
+	}
+	if !isPositiveIntegerString(c.Port) {
+		return errConfig("PORT must be a positive integer")
+	}
+
+	if c.ReadTimeout <= 0 {
+		return errConfig("READ_TIMEOUT_MS must be > 0")
+	}
+	if c.WriteTimeout <= 0 {
+		return errConfig("WRITE_TIMEOUT_MS must be > 0")
+	}
+	if c.IdleTimeout <= 0 {
+		return errConfig("IDLE_TIMEOUT_MS must be > 0")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return errConfig("SHUTDOWN_TIMEOUT_MS must be > 0")
+	}
+	if c.AIAuditorTimeout <= 0 {
+		return errConfig("AI_AUDITOR_TIMEOUT_MS must be > 0")
+	}
+
+	if strings.TrimSpace(c.InventoryBaseURL) == "" {
+		return errConfig("INVENTORY_BASE_URL is required")
+	}
+	if err := validateBaseURL(c.InventoryBaseURL, "INVENTORY_BASE_URL"); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.AIAuditorBaseURL) == "" {
+		return errConfig("AI_AUDITOR_BASE_URL is required")
+	}
+	if err := validateBaseURL(c.AIAuditorBaseURL, "AI_AUDITOR_BASE_URL"); err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(c.DBHost) == "" {
+		return errConfig("DB_HOST is required")
+	}
+	if strings.TrimSpace(c.DBPort) == "" || !isPositiveIntegerString(c.DBPort) {
+		return errConfig("DB_PORT must be a positive integer")
+	}
+	if strings.TrimSpace(c.DBUser) == "" {
+		return errConfig("DB_USER is required")
+	}
+	if strings.TrimSpace(c.DBName) == "" {
+		return errConfig("DB_NAME is required")
+	}
+	if strings.TrimSpace(c.DBSSLMode) == "" {
+		return errConfig("DB_SSLMODE is required")
+	}
+
+	if strings.TrimSpace(c.RabbitMQURL) != "" {
+		if err := validateAMQPURL(c.RabbitMQURL, "RABBITMQ_URL"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(c.RabbitMQExchange) == "" {
+			return errConfig("RABBITMQ_EXCHANGE is required when RABBITMQ_URL is set")
+		}
+		if strings.TrimSpace(c.RabbitMQTransactionApprovedQueue) == "" {
+			return errConfig("RABBITMQ_TRANSACTION_APPROVED_QUEUE is required when RABBITMQ_URL is set")
+		}
+		if strings.TrimSpace(c.RabbitMQTransactionApprovedRouting) == "" {
+			return errConfig("RABBITMQ_TRANSACTION_APPROVED_ROUTING_KEY is required when RABBITMQ_URL is set")
+		}
+	}
+
+	return nil
+}
+
 func (c Config) DSN() string {
 	return fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
@@ -90,8 +162,36 @@ func (c Config) IsDebugEnabled() bool {
 	}
 }
 
+func errConfig(msg string) error {
+	return fmt.Errorf("config validation error: %s", msg)
+}
+
+func validateBaseURL(raw string, field string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return errConfig(field + " must be a valid absolute URL")
+	}
+	return nil
+}
+
+func validateAMQPURL(raw string, field string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return errConfig(field + " must be a valid absolute AMQP URL")
+	}
+	if parsed.Scheme != "amqp" && parsed.Scheme != "amqps" {
+		return errConfig(field + " must use amqp or amqps scheme")
+	}
+	return nil
+}
+
+func isPositiveIntegerString(v string) bool {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	return err == nil && n > 0
+}
+
 func getEnv(key, def string) string {
-	v := os.Getenv(key)
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
@@ -99,7 +199,7 @@ func getEnv(key, def string) string {
 }
 
 func getEnvInt(key string, def int) int {
-	v := os.Getenv(key)
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}

@@ -3,12 +3,16 @@ package observability
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
+
+var httpDurationBuckets = []float64{0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5}
 
 var (
 	httpRequestsTotal = promauto.NewCounterVec(
@@ -23,7 +27,7 @@ var (
 		prometheus.HistogramOpts{
 			Name:    "finpharm_http_request_duration_seconds",
 			Help:    "HTTP request duration in seconds.",
-			Buckets: prometheus.DefBuckets,
+			Buckets: httpDurationBuckets,
 		},
 		[]string{"service", "method", "path", "status"},
 	)
@@ -37,37 +41,30 @@ var (
 	)
 )
 
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-}
-
-func (r *statusRecorder) WriteHeader(statusCode int) {
-	r.status = statusCode
-	r.ResponseWriter.WriteHeader(statusCode)
-}
-
 func MetricsHandler() http.Handler {
 	return promhttp.Handler()
 }
 
-func InstrumentHandler(service string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func Middleware(service string) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		start := time.Now()
 		httpInFlightRequests.WithLabelValues(service).Inc()
 		defer httpInFlightRequests.WithLabelValues(service).Dec()
 
-		rec := &statusRecorder{
-			ResponseWriter: w,
-			status:         http.StatusOK,
-		}
+		c.Next()
 
-		next.ServeHTTP(rec, r)
+		status := strconv.Itoa(c.Writer.Status())
+		path := normalizePathLabel(c.FullPath())
 
-		status := strconv.Itoa(rec.status)
-		path := r.URL.Path
+		httpRequestsTotal.WithLabelValues(service, c.Request.Method, path, status).Inc()
+		httpRequestDuration.WithLabelValues(service, c.Request.Method, path, status).Observe(time.Since(start).Seconds())
+	}
+}
 
-		httpRequestsTotal.WithLabelValues(service, r.Method, path, status).Inc()
-		httpRequestDuration.WithLabelValues(service, r.Method, path, status).Observe(time.Since(start).Seconds())
-	})
+func normalizePathLabel(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "unmatched"
+	}
+	return path
 }

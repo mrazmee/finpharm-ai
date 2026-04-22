@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -62,6 +63,55 @@ func Load() Config {
 	}
 }
 
+func (c Config) Validate() error {
+	if strings.TrimSpace(c.Port) == "" {
+		return errConfig("PORT is required")
+	}
+	if !isPositiveIntegerString(c.Port) {
+		return errConfig("PORT must be a positive integer")
+	}
+
+	driver := strings.ToLower(strings.TrimSpace(c.StorageDriver))
+	switch driver {
+	case "memory", "postgres":
+	default:
+		return errConfig("STORAGE_DRIVER must be either memory or postgres")
+	}
+
+	if c.ReadTimeout <= 0 {
+		return errConfig("READ_TIMEOUT_MS must be > 0")
+	}
+	if c.WriteTimeout <= 0 {
+		return errConfig("WRITE_TIMEOUT_MS must be > 0")
+	}
+	if c.IdleTimeout <= 0 {
+		return errConfig("IDLE_TIMEOUT_MS must be > 0")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return errConfig("SHUTDOWN_TIMEOUT_MS must be > 0")
+	}
+
+	if driver == "postgres" {
+		if strings.TrimSpace(c.DBHost) == "" {
+			return errConfig("DB_HOST is required when STORAGE_DRIVER=postgres")
+		}
+		if strings.TrimSpace(c.DBPort) == "" || !isPositiveIntegerString(c.DBPort) {
+			return errConfig("DB_PORT must be a positive integer when STORAGE_DRIVER=postgres")
+		}
+		if strings.TrimSpace(c.DBUser) == "" {
+			return errConfig("DB_USER is required when STORAGE_DRIVER=postgres")
+		}
+		if strings.TrimSpace(c.DBName) == "" {
+			return errConfig("DB_NAME is required when STORAGE_DRIVER=postgres")
+		}
+		if strings.TrimSpace(c.DBSSLMode) == "" {
+			return errConfig("DB_SSLMODE is required when STORAGE_DRIVER=postgres")
+		}
+	}
+
+	return nil
+}
+
 func (c Config) IsDebugEnabled() bool {
 	return c.AppEnv == "local" || c.AppEnv == "dev"
 }
@@ -78,8 +128,17 @@ func (c Config) DBConnString() string {
 	)
 }
 
+func errConfig(msg string) error {
+	return fmt.Errorf("config validation error: %s", msg)
+}
+
+func isPositiveIntegerString(v string) bool {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	return err == nil && n > 0
+}
+
 func getEnv(key, def string) string {
-	v := os.Getenv(key)
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
@@ -87,7 +146,7 @@ func getEnv(key, def string) string {
 }
 
 func getEnvInt(key string, def int) int {
-	v := os.Getenv(key)
+	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
 		return def
 	}
