@@ -24,7 +24,19 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	authHandler := handler.NewAuthHandler(cfg)
 
 	router := gin.New()
-	router.Use(middleware.RequestID(), gin.Logger(), observability.Middleware("gateway"), gin.Recovery())
+
+	router.Use(
+		middleware.RequestID(),
+		gin.Logger(),
+		observability.Middleware("gateway"),
+		gin.Recovery(),
+	)
+
+	if cfg.RateLimitEnabled {
+		generalLimiter := middleware.NewInMemoryRateLimiter(cfg.RateLimitGeneralLimit, cfg.RateLimitWindow)
+		authLimiter := middleware.NewInMemoryRateLimiter(cfg.RateLimitAuthLimit, cfg.RateLimitWindow)
+		router.Use(middleware.RateLimitGin(generalLimiter, authLimiter))
+	}
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{

@@ -3,13 +3,14 @@ package middleware
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 type rateEntry struct {
@@ -78,45 +79,42 @@ func (l *InMemoryRateLimiter) Allow(key string) (bool, int, time.Duration) {
 	return true, remaining, retryAfter
 }
 
-func RateLimitHandler(generalLimiter, authLimiter *InMemoryRateLimiter, next http.Handler) http.Handler {
-	if next == nil {
-		next = http.NotFoundHandler()
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func RateLimitGin(generalLimiter, authLimiter *InMemoryRateLimiter) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		limiter := generalLimiter
-		if isAuthPath(r.URL.Path) && authLimiter != nil {
+		if isAuthPath(c.Request.URL.Path) && authLimiter != nil {
 			limiter = authLimiter
 		}
 
 		if limiter == nil {
-			next.ServeHTTP(w, r)
+			c.Next()
 			return
 		}
 
-		key := clientIPFromRequest(r)
+		key := clientIPFromRequest(c.Request)
 		allowed, remaining, retryAfter := limiter.Allow(key)
 
-		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(limiter.limit))
-		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-		w.Header().Set("X-RateLimit-Window-Seconds", strconv.Itoa(int(limiter.window.Seconds())))
+		c.Header("X-RateLimit-Limit", strconv.Itoa(limiter.limit))
+		c.Header("X-RateLimit-Remaining", strconv.Itoa(remaining))
+		c.Header("X-RateLimit-Window-Seconds", strconv.Itoa(int(limiter.window.Seconds())))
 
 		if !allowed {
-			requestID := strings.TrimSpace(r.Header.Get("X-Request-Id"))
+			requestID := strings.TrimSpace(c.Writer.Header().Get("X-Request-Id"))
+			if requestID == "" {
+				requestID = strings.TrimSpace(c.GetHeader("X-Request-Id"))
+			}
 			if requestID == "" {
 				requestID = generateRequestID()
 			}
 
-			w.Header().Set("X-Request-Id", requestID)
-			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusTooManyRequests)
+			c.Header("X-Request-Id", requestID)
+			c.Header("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
 
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"error": map[string]any{
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": gin.H{
 					"code":    "RATE_LIMITED",
 					"message": "too many requests",
-					"details": map[string]any{
+					"details": gin.H{
 						"retry_after_seconds": int(retryAfter.Seconds()) + 1,
 					},
 					"request_id": requestID,
@@ -125,8 +123,8 @@ func RateLimitHandler(generalLimiter, authLimiter *InMemoryRateLimiter, next htt
 			return
 		}
 
-		next.ServeHTTP(w, r)
-	})
+		c.Next()
+	}
 }
 
 func isAuthPath(path string) bool {

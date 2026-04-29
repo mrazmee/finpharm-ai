@@ -33,6 +33,9 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	DBSSLMode  string
+
+	TxForceAuditApproved bool
+	TxForceDeductFailure bool
 }
 
 func Load() Config {
@@ -66,6 +69,9 @@ func Load() Config {
 		DBPassword: getEnv("DB_PASSWORD", "finpharm"),
 		DBName:     getEnv("DB_NAME", "transaction_db"),
 		DBSSLMode:  getEnv("DB_SSLMODE", "disable"),
+
+		TxForceAuditApproved: getEnvBool("TX_FORCE_AUDIT_APPROVED", false),
+		TxForceDeductFailure: getEnvBool("TX_FORCE_DEDUCT_FAILURE", false),
 	}
 }
 
@@ -137,6 +143,10 @@ func (c Config) Validate() error {
 		}
 	}
 
+	if (c.TxForceAuditApproved || c.TxForceDeductFailure) && !c.IsLocalEnv() {
+		return errConfig("TX_FORCE_AUDIT_APPROVED and TX_FORCE_DEDUCT_FAILURE are allowed only in local/dev environment")
+	}
+
 	return nil
 }
 
@@ -153,9 +163,13 @@ func (c Config) DSN() string {
 }
 
 func (c Config) IsDebugEnabled() bool {
+	return c.IsLocalEnv()
+}
+
+func (c Config) IsLocalEnv() bool {
 	env := strings.ToLower(strings.TrimSpace(c.AppEnv))
 	switch env {
-	case "local", "dev", "development":
+	case "", "local", "dev", "development":
 		return true
 	default:
 		return false
@@ -208,4 +222,19 @@ func getEnvInt(key string, def int) int {
 		return def
 	}
 	return i
+}
+
+func getEnvBool(key string, def bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return def
+	}
 }

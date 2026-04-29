@@ -2,6 +2,7 @@
 	run-gateway run-transaction run-inventory run-ai-auditor run-worker \
 	run-rabbitmq stop-rabbitmq logs-rabbitmq \
 	run-prometheus stop-prometheus \
+	run-alertmanager stop-alertmanager run-alert-webhook \
 	run-grafana stop-grafana \
 	reset-transaction-data demo-check demo-readiness demo-traffic \
 	test test-gateway test-transaction test-inventory test-ai-auditor test-worker
@@ -18,6 +19,9 @@ help:
 	@echo "  logs-rabbitmq           - Tail RabbitMQ logs"
 	@echo "  run-prometheus          - Run Prometheus container"
 	@echo "  stop-prometheus         - Stop Prometheus container"
+	@echo "  run-alertmanager        - Run Alertmanager container"
+	@echo "  stop-alertmanager       - Stop Alertmanager container"
+	@echo "  run-alert-webhook       - Run local alert webhook receiver"
 	@echo "  run-grafana             - Run Grafana container"
 	@echo "  stop-grafana            - Stop Grafana container"
 	@echo "  reset-transaction-data  - Reset transaction tables"
@@ -59,6 +63,15 @@ run-prometheus:
 
 stop-prometheus:
 	powershell -ExecutionPolicy Bypass -File .\scripts\stop-prometheus.ps1
+
+run-alertmanager:
+	powershell -ExecutionPolicy Bypass -File .\scripts\run-alertmanager.ps1
+
+stop-alertmanager:
+	powershell -ExecutionPolicy Bypass -File .\scripts\stop-alertmanager.ps1
+
+run-alert-webhook:
+	powershell -ExecutionPolicy Bypass -File .\scripts\run-alert-webhook.ps1
 
 run-grafana:
 	powershell -ExecutionPolicy Bypass -File .\scripts\run-grafana.ps1

@@ -12,7 +12,6 @@ import (
 	"finpharm-ai/internal/telemetry/tracehttp"
 	"finpharm-ai/services/gateway/internal/config"
 	"finpharm-ai/services/gateway/internal/httpapi"
-	gwmiddleware "finpharm-ai/services/gateway/internal/httpapi/middleware"
 	"finpharm-ai/services/gateway/internal/observability"
 )
 
@@ -29,16 +28,9 @@ func main() {
 
 	router := httpapi.NewRouter(cfg)
 
-	var appRouter http.Handler = router
-	if cfg.RateLimitEnabled {
-		generalLimiter := gwmiddleware.NewInMemoryRateLimiter(cfg.RateLimitGeneralLimit, cfg.RateLimitWindow)
-		authLimiter := gwmiddleware.NewInMemoryRateLimiter(cfg.RateLimitAuthLimit, cfg.RateLimitWindow)
-		appRouter = gwmiddleware.RateLimitHandler(generalLimiter, authLimiter, router)
-	}
-
 	baseMux := http.NewServeMux()
 	baseMux.Handle("/metrics", observability.MetricsHandler())
-	baseMux.Handle("/", appRouter)
+	baseMux.Handle("/", router)
 
 	appHandler := tracehttp.Handler("gateway", audithttp.Handler("gateway", baseMux))
 

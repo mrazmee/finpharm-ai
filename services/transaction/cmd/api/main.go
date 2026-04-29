@@ -12,6 +12,7 @@ import (
 	"finpharm-ai/internal/telemetry/audithttp"
 	"finpharm-ai/internal/telemetry/tracehttp"
 	"finpharm-ai/services/transaction/internal/config"
+	"finpharm-ai/services/transaction/internal/domain"
 	"finpharm-ai/services/transaction/internal/httpapi"
 	"finpharm-ai/services/transaction/internal/httpapi/handler"
 	"finpharm-ai/services/transaction/internal/observability"
@@ -48,10 +49,20 @@ func main() {
 
 	stockHTTPClient := &http.Client{Timeout: 4 * time.Second}
 	stockBreaker := repository.NewCircuitBreaker(3, 5*time.Second)
-	stockRepo := repository.NewStockHTTPRepo(cfg.InventoryBaseURL, stockHTTPClient, stockBreaker)
+	realStockRepo := repository.NewStockHTTPRepo(cfg.InventoryBaseURL, stockHTTPClient, stockBreaker)
+
+	var stockRepo domain.StockRepository = realStockRepo
+	if cfg.TxForceDeductFailure {
+		stockRepo = repository.NewForcedDeductFailureStockRepo(realStockRepo)
+	}
 
 	aiAuditorClient := &http.Client{Timeout: cfg.AIAuditorTimeout + time.Second}
-	aiAuditorRepo := repository.NewAIAuditorHTTPRepo(cfg.AIAuditorBaseURL, aiAuditorClient, cfg.AIAuditorTimeout)
+	realAIAuditorRepo := repository.NewAIAuditorHTTPRepo(cfg.AIAuditorBaseURL, aiAuditorClient, cfg.AIAuditorTimeout)
+
+	var aiAuditorRepo domain.AIAuditorRepository = realAIAuditorRepo
+	if cfg.TxForceAuditApproved {
+		aiAuditorRepo = repository.NewForcedApprovedAIAuditorRepo()
+	}
 
 	var eventPublisher *repository.RabbitMQTransactionEventPublisher
 	if cfg.RabbitMQURL != "" {
@@ -104,6 +115,8 @@ func main() {
 			"inventory_base_url", cfg.InventoryBaseURL,
 			"ai_auditor_base_url", cfg.AIAuditorBaseURL,
 			"ai_auditor_timeout_ms", int(cfg.AIAuditorTimeout.Milliseconds()),
+			"tx_force_audit_approved", cfg.TxForceAuditApproved,
+			"tx_force_deduct_failure", cfg.TxForceDeductFailure,
 			"rabbitmq_exchange", cfg.RabbitMQExchange,
 			"rabbitmq_transaction_approved_queue", cfg.RabbitMQTransactionApprovedQueue,
 			"rabbitmq_transaction_approved_routing_key", cfg.RabbitMQTransactionApprovedRouting,

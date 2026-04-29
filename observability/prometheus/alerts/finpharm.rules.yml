@@ -29,6 +29,7 @@ groups:
         labels:
           severity: warning
           category: reliability
+          service: gateway
         annotations:
           summary: "Gateway 5xx ratio is high"
           description: "Gateway 5xx ratio has been above 5% for at least 2 minutes."
@@ -40,6 +41,7 @@ groups:
         labels:
           severity: warning
           category: protection
+          service: gateway
         annotations:
           summary: "Gateway is rate limiting aggressively"
           description: "More than 10 HTTP 429 responses were produced by the gateway in the last 5 minutes."
