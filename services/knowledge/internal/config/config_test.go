@@ -38,3 +38,20 @@ func TestValidateForIngest_AllowsDryRunWithoutAPIKey(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 }
+
+func TestValidateForQuery_RequiresAPIKey(t *testing.T) {
+	cfg := Load()
+	cfg.GeminiAPIKey = ""
+
+	if err := cfg.ValidateForQuery(); err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+}
+
+func TestValidateForQuery_OK(t *testing.T) {
+	cfg := Load()
+
+	if err := cfg.ValidateForQuery(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}

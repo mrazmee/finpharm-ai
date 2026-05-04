@@ -110,6 +110,22 @@ func (c Config) ValidateForIngest() error {
 	return nil
 }
 
+func (c Config) ValidateForQuery() error {
+	if err := c.ValidateForMigrate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.GeminiAPIKey) == "" {
+		return errConfig("GEMINI_API_KEY or GOOGLE_API_KEY is required for retrieval query")
+	}
+	if strings.TrimSpace(c.EmbeddingModel) == "" {
+		return errConfig("KNOWLEDGE_EMBEDDING_MODEL is required")
+	}
+	if c.EmbeddingOutputDimension <= 0 {
+		return errConfig("KNOWLEDGE_EMBEDDING_DIMENSION must be > 0")
+	}
+	return nil
+}
+
 func (c Config) DSN() string {
 	return fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
