@@ -15,7 +15,6 @@ import (
 func TestGatewayCheckStock_ProxyOK(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	// Fake upstream transaction service
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/stock/check" || r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusNotFound)
@@ -23,11 +22,10 @@ func TestGatewayCheckStock_ProxyOK(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"data":{"medicine_id":"PARA500","requested_qty":1,"available_qty":80,"is_available":true},"request_id":"x"}`))
 	}))
 	defer upstream.Close()
 
-	// Build minimal gateway router (tanpa import httpapi)
 	r := gin.New()
 	r.Use(middleware.RequestID(), middleware.RequestLogger(), gin.Recovery())
 
@@ -43,5 +41,13 @@ func TestGatewayCheckStock_ProxyOK(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	// basic assertion: contains envelope keys
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"data"`)) {
+		t.Fatalf("expected response to contain data, got %s", w.Body.String())
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"request_id"`)) {
+		t.Fatalf("expected response to contain request_id, got %s", w.Body.String())
 	}
 }

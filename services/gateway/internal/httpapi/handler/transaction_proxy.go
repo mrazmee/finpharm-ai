@@ -1,0 +1,210 @@
+package handler
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+const headerIdempotencyKey = "Idempotency-Key"
+
+type TransactionProxyHandler struct {
+	baseURL string
+	client  *http.Client
+}
+
+func NewTransactionProxyHandler(transactionBaseURL string) *TransactionProxyHandler {
+	return &TransactionProxyHandler{
+		baseURL: transactionBaseURL,
+		client:  &http.Client{Timeout: 5 * time.Second},
+	}
+}
+
+type CreateTransactionRequest struct {
+	Items []CreateTransactionItemRequest `json:"items" binding:"required"`
+}
+
+type CreateTransactionItemRequest struct {
+	MedicineID string `json:"medicine_id"`
+	Qty        int    `json:"qty"`
+}
+
+func (h *TransactionProxyHandler) CreateTransaction(c *gin.Context) {
+	var req CreateTransactionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", err.Error())
+		return
+	}
+
+	idempotencyKey := strings.TrimSpace(c.GetHeader(headerIdempotencyKey))
+	if idempotencyKey == "" {
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+			"field":  "header.Idempotency-Key",
+			"reason": "is required",
+		})
+		return
+	}
+	if len(idempotencyKey) > 100 {
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+			"field":  "header.Idempotency-Key",
+			"reason": "must be <= 100 characters",
+		})
+		return
+	}
+
+	if len(req.Items) == 0 {
+		RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+			"field":  "items",
+			"reason": "must contain at least 1 item",
+		})
+		return
+	}
+
+	for i, item := range req.Items {
+		if strings.TrimSpace(item.MedicineID) == "" {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "items[" + strconv.Itoa(i) + "].medicine_id",
+				"reason": "is required",
+			})
+			return
+		}
+		if item.Qty <= 0 {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "items[" + strconv.Itoa(i) + "].qty",
+				"reason": "must be > 0",
+			})
+			return
+		}
+	}
+
+	bodyBytes, err := json.Marshal(req)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, "GATEWAY_ERROR", "failed to encode request", nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	url := h.baseURL + "/v1/transactions"
+	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, "GATEWAY_ERROR", "failed to create upstream request", nil)
+		return
+	}
+
+	upReq.Header.Set("Content-Type", "application/json")
+	upReq.Header.Set(headerIdempotencyKey, idempotencyKey)
+	setProxyForwardHeaders(c, upReq)
+
+	resp, err := h.client.Do(upReq)
+	if err != nil {
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "transaction service unreachable", err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "failed to read upstream response", nil)
+		return
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+
+	if gotKey := resp.Header.Get(headerIdempotencyKey); gotKey != "" {
+		c.Header(headerIdempotencyKey, gotKey)
+	}
+
+	c.Data(resp.StatusCode, ct, respBody)
+}
+
+func (h *TransactionProxyHandler) ListTransactions(c *gin.Context) {
+	if limitStr := c.Query("limit"); limitStr != "" {
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "limit",
+				"reason": "must be an integer",
+			})
+			return
+		}
+		if limit <= 0 {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "limit",
+				"reason": "must be > 0",
+			})
+			return
+		}
+		if limit > 100 {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "limit",
+				"reason": "must be <= 100",
+			})
+			return
+		}
+	}
+
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		offset, err := strconv.Atoi(offsetStr)
+		if err != nil {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "offset",
+				"reason": "must be an integer",
+			})
+			return
+		}
+		if offset < 0 {
+			RespondError(c, http.StatusBadRequest, "VALIDATION_ERROR", "validation failed", gin.H{
+				"field":  "offset",
+				"reason": "must be >= 0",
+			})
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	url := h.baseURL + "/v1/transactions"
+	if q := c.Request.URL.RawQuery; q != "" {
+		url += "?" + q
+	}
+
+	upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		RespondError(c, http.StatusInternalServerError, "GATEWAY_ERROR", "failed to create upstream request", nil)
+		return
+	}
+
+	setProxyForwardHeaders(c, upReq)
+
+	resp, err := h.client.Do(upReq)
+	if err != nil {
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "transaction service unreachable", err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "failed to read upstream response", nil)
+		return
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+	c.Data(resp.StatusCode, ct, body)
+}

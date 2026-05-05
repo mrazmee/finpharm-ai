@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"time"
 
-	"finpharm-ai/services/gateway/internal/httpapi/middleware"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -54,12 +52,7 @@ func (h *StockProxyHandler) CheckStock(c *gin.Context) {
 	}
 
 	upReq.Header.Set("Content-Type", "application/json")
-
-	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
-	rid, _ := ridVal.(string)
-	upReq.Header.Set(middleware.HeaderRequestID, rid)
-
-	upReq.Header.Set("X-From-Gateway", "finpharm-gateway")
+	setProxyForwardHeaders(c, upReq)
 
 	resp, err := h.client.Do(upReq)
 	if err != nil {

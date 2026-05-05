@@ -1,0 +1,90 @@
+groups:
+  - name: finpharm-availability
+    interval: 15s
+    rules:
+      - alert: FinpharmServiceDown
+        expr: up{job=~"gateway|transaction|inventory|ai-auditor|worker"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Finpharm service down: {{ $labels.job }}"
+          description: "Prometheus cannot scrape {{ $labels.job }} at {{ $labels.instance }} for at least 30 seconds."
+          action: "Check the service process, logs, bound port, and /metrics endpoint."
+
+  - name: finpharm-gateway
+    interval: 15s
+    rules:
+      - alert: FinpharmGatewayHigh5xxRatio
+        expr: |
+          (
+            sum(rate(finpharm_http_requests_total{service="gateway",status=~"5.."}[5m]))
+            /
+            sum(rate(finpharm_http_requests_total{service="gateway"}[5m]))
+          ) > 0.05
+          and
+          sum(rate(finpharm_http_requests_total{service="gateway"}[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          category: reliability
+          service: gateway
+        annotations:
+          summary: "Gateway 5xx ratio is high"
+          description: "Gateway 5xx ratio has been above 5% for at least 2 minutes."
+          action: "Check gateway logs, upstream availability, and recent 502/500 patterns in Grafana."
+
+      - alert: FinpharmGatewayHigh429Burst
+        expr: increase(finpharm_http_requests_total{service="gateway",status="429"}[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+          category: protection
+          service: gateway
+        annotations:
+          summary: "Gateway is rate limiting aggressively"
+          description: "More than 10 HTTP 429 responses were produced by the gateway in the last 5 minutes."
+          action: "Check whether this is expected load, abuse simulation, or rate-limit threshold that is too strict."
+
+  - name: finpharm-ai-auditor
+    interval: 15s
+    rules:
+      - alert: FinpharmAIAuditorFallbackDetected
+        expr: increase(finpharm_ai_auditor_fallback_total[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          category: ai
+        annotations:
+          summary: "AI auditor fallback detected"
+          description: "The AI auditor used fallback logic at least once in the last 10 minutes."
+          action: "Check AI auditor logs, primary provider health, and fallback reasons."
+
+  - name: finpharm-transaction
+    interval: 15s
+    rules:
+      - alert: FinpharmTransactionFailedDetected
+        expr: increase(finpharm_transaction_outcomes_total{status="FAILED"}[10m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "Failed transactions detected"
+          description: "At least one transaction reached FAILED status in the last 10 minutes."
+          action: "Check transaction logs, stock deduction failures, and recent audit/update flow."
+
+  - name: finpharm-worker
+    interval: 15s
+    rules:
+      - alert: FinpharmWorkerDLQDetected
+        expr: increase(finpharm_worker_events_total{result=~"dlq|invalid_dlq"}[10m]) > 0
+        for: 30s
+        labels:
+          severity: critical
+          category: async-processing
+        annotations:
+          summary: "Worker moved messages to DLQ"
+          description: "The worker routed at least one message to DLQ or invalid_dlq in the last 10 minutes."
+          action: "Check worker logs, inspect RabbitMQ DLQ, and validate event payload / consumer handling."

@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: finpharm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finpharm
+      POSTGRES_PASSWORD: finpharm
+      POSTGRES_DB: postgres
+    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh:ro
+      - ./scripts/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finpharm -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:

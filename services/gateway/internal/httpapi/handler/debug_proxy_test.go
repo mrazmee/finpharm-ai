@@ -19,6 +19,19 @@ func TestGatewayDebugSleep_EnabledInLocal(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		if r.URL.RawQuery != "ms=1" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.Header.Get("X-Request-ID") != "gw-debug-123" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if r.Header.Get("X-Caller-Service") != "gateway" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"slept_ms":1}`))
@@ -34,6 +47,7 @@ func TestGatewayDebugSleep_EnabledInLocal(t *testing.T) {
 	r := httpapi.NewRouter(cfg)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/debug/sleep?ms=1", nil)
+	req.Header.Set("X-Request-ID", "gw-debug-123")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

@@ -7,9 +7,20 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"finpharm-ai/internal/telemetry/audithttp"
+	"finpharm-ai/internal/telemetry/tracehttp"
 	"finpharm-ai/services/transaction/internal/config"
+	"finpharm-ai/services/transaction/internal/domain"
 	"finpharm-ai/services/transaction/internal/httpapi"
+	"finpharm-ai/services/transaction/internal/httpapi/handler"
+	"finpharm-ai/services/transaction/internal/observability"
+	"finpharm-ai/services/transaction/internal/repository"
+	"finpharm-ai/services/transaction/internal/usecase"
+
+	"github.com/jmoiron/sqlx"
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -18,12 +29,81 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		slog.Error("config_invalid", "error", err)
+		os.Exit(1)
+	}
 
-	router := httpapi.NewRouter(cfg)
+	db, err := sqlx.Connect("postgres", cfg.DSN())
+	if err != nil {
+		slog.Error("db_connect_error", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(30 * time.Minute)
+
+	txRepo := repository.NewTransactionSQLXRepo(db)
+
+	stockHTTPClient := &http.Client{Timeout: 4 * time.Second}
+	stockBreaker := repository.NewCircuitBreaker(3, 5*time.Second)
+	realStockRepo := repository.NewStockHTTPRepo(cfg.InventoryBaseURL, stockHTTPClient, stockBreaker)
+
+	var stockRepo domain.StockRepository = realStockRepo
+	if cfg.TxForceDeductFailure {
+		stockRepo = repository.NewForcedDeductFailureStockRepo(realStockRepo)
+	}
+
+	aiAuditorClient := &http.Client{Timeout: cfg.AIAuditorTimeout + time.Second}
+	realAIAuditorRepo := repository.NewAIAuditorHTTPRepo(cfg.AIAuditorBaseURL, aiAuditorClient, cfg.AIAuditorTimeout)
+
+	var aiAuditorRepo domain.AIAuditorRepository = realAIAuditorRepo
+	if cfg.TxForceAuditApproved {
+		aiAuditorRepo = repository.NewForcedApprovedAIAuditorRepo()
+	}
+
+	var eventPublisher *repository.RabbitMQTransactionEventPublisher
+	if cfg.RabbitMQURL != "" {
+		publisher, err := repository.NewRabbitMQTransactionEventPublisher(
+			cfg.RabbitMQURL,
+			cfg.RabbitMQExchange,
+			cfg.RabbitMQTransactionApprovedQueue,
+			cfg.RabbitMQTransactionApprovedRouting,
+		)
+		if err != nil {
+			slog.Warn("rabbitmq_publisher_init_failed",
+				"error", err,
+				"rabbitmq_url", cfg.RabbitMQURL,
+			)
+		} else {
+			eventPublisher = publisher
+			defer func() {
+				if err := eventPublisher.Close(); err != nil {
+					slog.Warn("rabbitmq_publisher_close_failed", "error", err)
+				}
+			}()
+		}
+	}
+
+	stockUC := usecase.NewStockUsecase(stockRepo)
+	txUC := usecase.NewTransactionUsecase(txRepo, stockRepo, aiAuditorRepo, eventPublisher)
+
+	stockHandler := handler.NewStockHandler(stockUC)
+	txHandler := handler.NewTransactionHandler(txUC)
+
+	router := httpapi.NewRouter(cfg, stockHandler, txHandler)
+
+	baseMux := http.NewServeMux()
+	baseMux.Handle("/metrics", observability.MetricsHandler())
+	baseMux.Handle("/", router)
+
+	appHandler := tracehttp.Handler("transaction", audithttp.Handler("transaction", baseMux))
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
-		Handler:      router,
+		Handler:      appHandler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 		IdleTimeout:  cfg.IdleTimeout,
@@ -32,6 +112,16 @@ func main() {
 	go func() {
 		slog.Info("server_start",
 			"port", cfg.Port,
+			"inventory_base_url", cfg.InventoryBaseURL,
+			"ai_auditor_base_url", cfg.AIAuditorBaseURL,
+			"ai_auditor_timeout_ms", int(cfg.AIAuditorTimeout.Milliseconds()),
+			"tx_force_audit_approved", cfg.TxForceAuditApproved,
+			"tx_force_deduct_failure", cfg.TxForceDeductFailure,
+			"rabbitmq_exchange", cfg.RabbitMQExchange,
+			"rabbitmq_transaction_approved_queue", cfg.RabbitMQTransactionApprovedQueue,
+			"rabbitmq_transaction_approved_routing_key", cfg.RabbitMQTransactionApprovedRouting,
+			"metrics_path", "/metrics",
+			"trace_header", tracehttp.HeaderTraceID,
 			"read_timeout_ms", int(cfg.ReadTimeout.Milliseconds()),
 			"write_timeout_ms", int(cfg.WriteTimeout.Milliseconds()),
 			"idle_timeout_ms", int(cfg.IdleTimeout.Milliseconds()),

@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"finpharm-ai/services/transaction/internal/domain"
+	"finpharm-ai/services/transaction/internal/httpapi/middleware"
+	"finpharm-ai/services/transaction/internal/repository"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,7 +37,12 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 		return
 	}
 
-	result, err := h.uc.CheckStock(c.Request.Context(), domain.StockCheckRequest{
+	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
+	rid, _ := ridVal.(string)
+
+	ctx := repository.WithRequestID(c.Request.Context(), rid)
+
+	result, err := h.uc.CheckStock(ctx, domain.StockCheckRequest{
 		MedicineID: req.MedicineID,
 		Qty:        req.Qty,
 	})
@@ -54,12 +61,19 @@ func (h *StockHandler) CheckStock(c *gin.Context) {
 			})
 			return
 		}
+		if ue, ok := domain.IsUpstream(err); ok {
+			RespondError(c, http.StatusBadGateway, "UPSTREAM_ERROR", "inventory service error", gin.H{
+				"service": ue.Service,
+				"reason":  ue.Reason,
+			})
+			return
+		}
 
-		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", err.Error())
+		RespondError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check stock", nil)
 		return
 	}
 
-	c.JSON(http.StatusOK, CheckStockResponse{
+	RespondOK(c, http.StatusOK, CheckStockResponse{
 		MedicineID:   result.MedicineID,
 		RequestedQty: result.RequestedQty,
 		AvailableQty: result.AvailableQty,

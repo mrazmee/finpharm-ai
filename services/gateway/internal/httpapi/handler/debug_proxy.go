@@ -28,7 +28,11 @@ func (h *DebugProxyHandler) Sleep(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	url := h.baseURL + "/v1/debug/sleep?ms=" + c.Query("ms")
+	url := h.baseURL + "/v1/debug/sleep"
+	if q := c.Request.URL.RawQuery; q != "" {
+		url += "?" + q
+	}
+
 	upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		RespondError(c, http.StatusInternalServerError, "GATEWAY_ERROR", "failed to create upstream request", nil)
@@ -38,7 +42,7 @@ func (h *DebugProxyHandler) Sleep(c *gin.Context) {
 	ridVal, _ := c.Get(middleware.CtxKeyRequestID)
 	rid, _ := ridVal.(string)
 	upReq.Header.Set(middleware.HeaderRequestID, rid)
-	upReq.Header.Set("X-From-Gateway", "finpharm-gateway")
+	upReq.Header.Set("X-Caller-Service", "gateway")
 
 	resp, err := h.client.Do(upReq)
 	if err != nil {

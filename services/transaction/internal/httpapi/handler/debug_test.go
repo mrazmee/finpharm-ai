@@ -13,7 +13,7 @@ import (
 func TestDebugSleep_EnabledInLocal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	r := httpapi.NewRouter(config.Config{AppEnv: "local"})
+	r := httpapi.NewRouter(config.Config{AppEnv: "local"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/debug/sleep?ms=1", nil)
 	w := httptest.NewRecorder()
@@ -27,7 +27,7 @@ func TestDebugSleep_EnabledInLocal(t *testing.T) {
 func TestDebugSleep_DisabledInProd(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	r := httpapi.NewRouter(config.Config{AppEnv: "prod"})
+	r := httpapi.NewRouter(config.Config{AppEnv: "prod"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/debug/sleep?ms=1", nil)
 	w := httptest.NewRecorder()

@@ -20,8 +20,9 @@ func NewStockMemoryRepo() *StockMemoryRepo {
 	}
 }
 
-func (r *StockMemoryRepo) GetAvailableQty(ctx context.Context, medicineID string) (int, error) {
+func (r *StockMemoryRepo) GetAvailableQty(ctx context.Context, medicineID string, requestedQty int) (int, error) {
 	_ = ctx
+	_ = requestedQty
 
 	qty, ok := r.stock[medicineID]
 	if !ok {
@@ -31,4 +32,26 @@ func (r *StockMemoryRepo) GetAvailableQty(ctx context.Context, medicineID string
 		}
 	}
 	return qty, nil
+}
+
+func (r *StockMemoryRepo) DeductStock(ctx context.Context, medicineID string, qty int) error {
+	_ = ctx
+
+	available, ok := r.stock[medicineID]
+	if !ok {
+		return &domain.NotFoundError{
+			Resource: "medicine",
+			Key:      medicineID,
+		}
+	}
+	if available < qty {
+		return &domain.InsufficientStockError{
+			MedicineID:   medicineID,
+			RequestedQty: qty,
+			AvailableQty: available,
+		}
+	}
+
+	r.stock[medicineID] = available - qty
+	return nil
 }
