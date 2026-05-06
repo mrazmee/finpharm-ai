@@ -24,6 +24,10 @@ type Config struct {
 	EmbeddingModel           string
 	EmbeddingOutputDimension int
 
+	AnswerModel           string
+	AnswerTemperature     float64
+	AnswerMaxOutputTokens int
+
 	ChunkMaxChars     int
 	ChunkOverlapChars int
 	BatchSize         int
@@ -48,6 +52,10 @@ func Load() Config {
 		GeminiAPIKey:             firstNonEmpty(os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLE_API_KEY")),
 		EmbeddingModel:           getEnv("KNOWLEDGE_EMBEDDING_MODEL", "models/gemini-embedding-001"),
 		EmbeddingOutputDimension: getEnvInt("KNOWLEDGE_EMBEDDING_DIMENSION", 768),
+
+		AnswerModel:           getEnv("KNOWLEDGE_ANSWER_MODEL", "models/gemini-2.5-flash"),
+		AnswerTemperature:     getEnvFloat("KNOWLEDGE_ANSWER_TEMPERATURE", 0.2),
+		AnswerMaxOutputTokens: getEnvInt("KNOWLEDGE_ANSWER_MAX_OUTPUT_TOKENS", 700),
 
 		ChunkMaxChars:     getEnvInt("KNOWLEDGE_CHUNK_MAX_CHARS", 900),
 		ChunkOverlapChars: getEnvInt("KNOWLEDGE_CHUNK_OVERLAP_CHARS", 120),
@@ -126,6 +134,22 @@ func (c Config) ValidateForQuery() error {
 	return nil
 }
 
+func (c Config) ValidateForAnswer() error {
+	if err := c.ValidateForQuery(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.AnswerModel) == "" {
+		return errConfig("KNOWLEDGE_ANSWER_MODEL is required")
+	}
+	if c.AnswerMaxOutputTokens <= 0 {
+		return errConfig("KNOWLEDGE_ANSWER_MAX_OUTPUT_TOKENS must be > 0")
+	}
+	if c.AnswerTemperature < 0 || c.AnswerTemperature > 2 {
+		return errConfig("KNOWLEDGE_ANSWER_TEMPERATURE must be between 0 and 2")
+	}
+	return nil
+}
+
 func (c Config) DSN() string {
 	return fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
@@ -165,6 +189,18 @@ func getEnvInt(key string, def int) int {
 		return def
 	}
 	return i
+}
+
+func getEnvFloat(key string, def float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+	return f
 }
 
 func getEnvBool(key string, def bool) bool {

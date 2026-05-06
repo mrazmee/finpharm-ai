@@ -50,8 +50,28 @@ func TestValidateForQuery_RequiresAPIKey(t *testing.T) {
 
 func TestValidateForQuery_OK(t *testing.T) {
 	cfg := Load()
+	cfg.GeminiAPIKey = "dummy-key"
 
 	if err := cfg.ValidateForQuery(); err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestValidateForAnswer_OK(t *testing.T) {
+	cfg := Load()
+	cfg.GeminiAPIKey = "dummy-key"
+
+	if err := cfg.ValidateForAnswer(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestValidateForAnswer_RejectsBadTemperature(t *testing.T) {
+	cfg := Load()
+	cfg.GeminiAPIKey = "dummy-key"
+	cfg.AnswerTemperature = 2.5
+
+	if err := cfg.ValidateForAnswer(); err == nil {
+		t.Fatal("expected validation error, got nil")
 	}
 }
