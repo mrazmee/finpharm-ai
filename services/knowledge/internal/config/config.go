@@ -24,9 +24,12 @@ type Config struct {
 	EmbeddingModel           string
 	EmbeddingOutputDimension int
 
-	AnswerModel           string
-	AnswerTemperature     float64
-	AnswerMaxOutputTokens int
+	AnswerModel                string
+	AnswerTemperature          float64
+	AnswerMaxOutputTokens      int
+	AnswerMinTopScore          float64
+	AnswerMaxChunksPerDocument int
+	AnswerScoreWindow          float64
 
 	ChunkMaxChars     int
 	ChunkOverlapChars int
@@ -53,9 +56,12 @@ func Load() Config {
 		EmbeddingModel:           getEnv("KNOWLEDGE_EMBEDDING_MODEL", "models/gemini-embedding-001"),
 		EmbeddingOutputDimension: getEnvInt("KNOWLEDGE_EMBEDDING_DIMENSION", 768),
 
-		AnswerModel:           getEnv("KNOWLEDGE_ANSWER_MODEL", "models/gemini-2.5-flash"),
-		AnswerTemperature:     getEnvFloat("KNOWLEDGE_ANSWER_TEMPERATURE", 0.2),
-		AnswerMaxOutputTokens: getEnvInt("KNOWLEDGE_ANSWER_MAX_OUTPUT_TOKENS", 700),
+		AnswerModel:                getEnv("KNOWLEDGE_ANSWER_MODEL", "models/gemini-2.5-flash"),
+		AnswerTemperature:          getEnvFloat("KNOWLEDGE_ANSWER_TEMPERATURE", 0.2),
+		AnswerMaxOutputTokens:      getEnvInt("KNOWLEDGE_ANSWER_MAX_OUTPUT_TOKENS", 700),
+		AnswerMinTopScore:          getEnvFloat("KNOWLEDGE_ANSWER_MIN_TOP_SCORE", 0.62),
+		AnswerMaxChunksPerDocument: getEnvInt("KNOWLEDGE_ANSWER_MAX_CHUNKS_PER_DOCUMENT", 2),
+		AnswerScoreWindow:          getEnvFloat("KNOWLEDGE_ANSWER_SCORE_WINDOW", 0.05),
 
 		ChunkMaxChars:     getEnvInt("KNOWLEDGE_CHUNK_MAX_CHARS", 900),
 		ChunkOverlapChars: getEnvInt("KNOWLEDGE_CHUNK_OVERLAP_CHARS", 120),
@@ -146,6 +152,15 @@ func (c Config) ValidateForAnswer() error {
 	}
 	if c.AnswerTemperature < 0 || c.AnswerTemperature > 2 {
 		return errConfig("KNOWLEDGE_ANSWER_TEMPERATURE must be between 0 and 2")
+	}
+	if c.AnswerMinTopScore < 0 || c.AnswerMinTopScore > 1 {
+		return errConfig("KNOWLEDGE_ANSWER_MIN_TOP_SCORE must be between 0 and 1")
+	}
+	if c.AnswerMaxChunksPerDocument <= 0 {
+		return errConfig("KNOWLEDGE_ANSWER_MAX_CHUNKS_PER_DOCUMENT must be > 0")
+	}
+	if c.AnswerScoreWindow < 0 || c.AnswerScoreWindow > 1 {
+		return errConfig("KNOWLEDGE_ANSWER_SCORE_WINDOW must be between 0 and 1")
 	}
 	return nil
 }

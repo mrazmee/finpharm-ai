@@ -27,7 +27,9 @@ func BuildGroundedAnswerPrompt(question string, snippets []SourceSnippet) string
 	b.WriteString("4. Berikan jawaban yang ringkas, jelas, dan operasional.\n")
 	b.WriteString("5. Setiap poin penting harus memakai citation inline seperti [S1] atau [S2].\n")
 	b.WriteString("6. Jangan membuat aturan yang tidak tertulis di sumber.\n")
-	b.WriteString("7. Jangan menuliskan bagian SOURCES. Hanya tulis jawaban final.\n\n")
+	b.WriteString("7. Jangan menuliskan bagian SOURCES. Hanya tulis jawaban final.\n")
+	b.WriteString("8. Jangan pernah menulis citation setengah jadi seperti [S1 tanpa tanda ] penutup.\n")
+	b.WriteString("9. Gunakan citation yang paling langsung mendukung klaim.\n\n")
 
 	b.WriteString("PERTANYAAN USER:\n")
 	b.WriteString(strings.TrimSpace(question))

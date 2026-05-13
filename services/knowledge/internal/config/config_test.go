@@ -75,3 +75,23 @@ func TestValidateForAnswer_RejectsBadTemperature(t *testing.T) {
 		t.Fatal("expected validation error, got nil")
 	}
 }
+
+func TestValidateForAnswer_RejectsBadMinTopScore(t *testing.T) {
+	cfg := Load()
+	cfg.GeminiAPIKey = "dummy-key"
+	cfg.AnswerMinTopScore = 1.2
+
+	if err := cfg.ValidateForAnswer(); err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+}
+
+func TestValidateForAnswer_RejectsBadScoreWindow(t *testing.T) {
+	cfg := Load()
+	cfg.GeminiAPIKey = "dummy-key"
+	cfg.AnswerScoreWindow = 1.5
+
+	if err := cfg.ValidateForAnswer(); err == nil {
+		t.Fatal("expected validation error, got nil")
+	}
+}

@@ -69,20 +69,41 @@ func main() {
 	}
 
 	searchStore := retrieval.NewStore(db)
-	results, err := searchStore.Search(ctx, queryEmbedding, *limit, *minScore)
+
+	candidateLimit := *limit * 3
+	if candidateLimit < *limit {
+		candidateLimit = *limit
+	}
+
+	rawResults, err := searchStore.Search(ctx, queryEmbedding, candidateLimit, *minScore)
 	if err != nil {
 		slog.Error("knowledge_search_error", "error", err)
 		os.Exit(1)
 	}
 
+	if len(rawResults) == 0 || rawResults[0].Score < cfg.AnswerMinTopScore {
+		fmt.Printf("Question: %s\n\n", strings.TrimSpace(*query))
+		fmt.Println("Answer:")
+		fmt.Println(insufficientContextMessage)
+		return
+	}
+
+	windowedResults := retrieval.FilterByTopScoreWindow(rawResults, cfg.AnswerScoreWindow)
+	results := retrieval.DiversifyResults(windowedResults, *limit, cfg.AnswerMaxChunksPerDocument)
+
 	slog.Info("knowledge_answer_retrieval_complete",
 		"query", *query,
-		"results", len(results),
+		"raw_results", len(rawResults),
+		"windowed_results", len(windowedResults),
+		"diversified_results", len(results),
 		"top_k", *limit,
 		"min_score", *minScore,
+		"min_top_score", cfg.AnswerMinTopScore,
+		"score_window", cfg.AnswerScoreWindow,
+		"max_chunks_per_document", cfg.AnswerMaxChunksPerDocument,
 	)
 
-	if len(results) == 0 {
+	if len(results) == 0 || results[0].Score < cfg.AnswerMinTopScore {
 		fmt.Printf("Question: %s\n\n", strings.TrimSpace(*query))
 		fmt.Println("Answer:")
 		fmt.Println(insufficientContextMessage)
@@ -118,6 +139,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	answer = synthesis.NormalizeAnswerCitations(strings.TrimSpace(answer))
+
 	slog.Info("knowledge_answer_complete",
 		"query", *query,
 		"answer_chars", len(answer),
@@ -125,12 +148,29 @@ func main() {
 
 	fmt.Printf("Question: %s\n\n", strings.TrimSpace(*query))
 	fmt.Println("Answer:")
-	fmt.Println(strings.TrimSpace(answer))
+	fmt.Println(answer)
+
+	if answer == insufficientContextMessage {
+		return
+	}
+
+	usedRefs := synthesis.ExtractUsedSourceRefs(answer)
+	usedSources := synthesis.FilterSourcesByRefs(snippets, usedRefs)
+
+	if len(usedSources) == 0 {
+		slog.Warn("answer_missing_inline_citations", "query", *query)
+		if len(snippets) > 2 {
+			usedSources = snippets[:2]
+		} else {
+			usedSources = snippets
+		}
+	}
+
 	fmt.Println()
 	fmt.Println("Sources:")
-	for i, item := range results {
-		fmt.Printf("[S%d] %s | %s | %s | score=%.4f\n",
-			i+1,
+	for _, item := range usedSources {
+		fmt.Printf("%s %s | %s | %s | score=%.4f\n",
+			item.Ref,
 			item.Title,
 			item.Heading,
 			item.SourceKey,
