@@ -5,10 +5,17 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
 	AppEnv string
+
+	Port            string
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
 
 	DBHost     string
 	DBPort     string
@@ -39,8 +46,19 @@ type Config struct {
 }
 
 func Load() Config {
+	readMs := getEnvInt("READ_TIMEOUT_MS", 5000)
+	writeMs := getEnvInt("WRITE_TIMEOUT_MS", 5000)
+	idleMs := getEnvInt("IDLE_TIMEOUT_MS", 30000)
+	shutdownMs := getEnvInt("SHUTDOWN_TIMEOUT_MS", 7000)
+
 	return Config{
 		AppEnv: getEnv("APP_ENV", "local"),
+
+		Port:            getEnv("PORT", "8084"),
+		ReadTimeout:     time.Duration(readMs) * time.Millisecond,
+		WriteTimeout:    time.Duration(writeMs) * time.Millisecond,
+		IdleTimeout:     time.Duration(idleMs) * time.Millisecond,
+		ShutdownTimeout: time.Duration(shutdownMs) * time.Millisecond,
 
 		DBHost:     getEnv("KNOWLEDGE_DB_HOST", "127.0.0.1"),
 		DBPort:     getEnv("KNOWLEDGE_DB_PORT", "55432"),
@@ -161,6 +179,31 @@ func (c Config) ValidateForAnswer() error {
 	}
 	if c.AnswerScoreWindow < 0 || c.AnswerScoreWindow > 1 {
 		return errConfig("KNOWLEDGE_ANSWER_SCORE_WINDOW must be between 0 and 1")
+	}
+	return nil
+}
+
+func (c Config) ValidateForAPI() error {
+	if err := c.ValidateForAnswer(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.Port) == "" {
+		return errConfig("PORT is required")
+	}
+	if !isPositiveIntegerString(c.Port) {
+		return errConfig("PORT must be a positive integer")
+	}
+	if c.ReadTimeout <= 0 {
+		return errConfig("READ_TIMEOUT_MS must be > 0")
+	}
+	if c.WriteTimeout <= 0 {
+		return errConfig("WRITE_TIMEOUT_MS must be > 0")
+	}
+	if c.IdleTimeout <= 0 {
+		return errConfig("IDLE_TIMEOUT_MS must be > 0")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return errConfig("SHUTDOWN_TIMEOUT_MS must be > 0")
 	}
 	return nil
 }

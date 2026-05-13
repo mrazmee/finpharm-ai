@@ -95,3 +95,12 @@ func TestValidateForAnswer_RejectsBadScoreWindow(t *testing.T) {
 		t.Fatal("expected validation error, got nil")
 	}
 }
+
+func TestValidateForAPI_OK(t *testing.T) {
+	cfg := Load()
+	cfg.GeminiAPIKey = "dummy-key"
+
+	if err := cfg.ValidateForAPI(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
