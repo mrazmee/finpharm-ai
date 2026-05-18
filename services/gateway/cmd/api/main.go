@@ -47,6 +47,7 @@ func main() {
 			"port", cfg.Port,
 			"inventory_base_url", cfg.InventoryBaseURL,
 			"transaction_base_url", cfg.TransactionBaseURL,
+			"knowledge_base_url", cfg.KnowledgeBaseURL,
 			"auth_enabled", cfg.AuthEnabled,
 			"jwt_issuer", cfg.JWTIssuer,
 			"jwt_expire_minutes", cfg.JWTExpireMinutes,

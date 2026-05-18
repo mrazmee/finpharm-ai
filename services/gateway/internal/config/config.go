@@ -15,6 +15,7 @@ type Config struct {
 	Port               string
 	InventoryBaseURL   string
 	TransactionBaseURL string
+	KnowledgeBaseURL   string
 
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
@@ -38,6 +39,7 @@ func Load() Config {
 		Port:               getEnv("PORT", "8080"),
 		InventoryBaseURL:   getEnv("INVENTORY_BASE_URL", "http://localhost:8082"),
 		TransactionBaseURL: getEnv("TRANSACTION_BASE_URL", "http://localhost:8081"),
+		KnowledgeBaseURL:   getEnv("KNOWLEDGE_BASE_URL", "http://localhost:8084"),
 
 		ReadTimeout:     getEnvDurationMS("READ_TIMEOUT_MS", 5000),
 		WriteTimeout:    getEnvDurationMS("WRITE_TIMEOUT_MS", 5000),
@@ -73,6 +75,12 @@ func (c Config) Validate() error {
 		return errConfig("TRANSACTION_BASE_URL is required")
 	}
 	if err := validateBaseURL(c.TransactionBaseURL, "TRANSACTION_BASE_URL"); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.KnowledgeBaseURL) == "" {
+		return errConfig("KNOWLEDGE_BASE_URL is required")
+	}
+	if err := validateBaseURL(c.KnowledgeBaseURL, "KNOWLEDGE_BASE_URL"); err != nil {
 		return err
 	}
 
@@ -119,7 +127,6 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// IsDebugEnabled dipertahankan karena masih dipakai oleh router/handler gateway.
 func (c Config) IsDebugEnabled() bool {
 	return strings.EqualFold(strings.TrimSpace(c.AppEnv), "local")
 }
