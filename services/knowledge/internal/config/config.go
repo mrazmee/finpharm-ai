@@ -1,0 +1,286 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type Config struct {
+	AppEnv string
+
+	Port            string
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	ShutdownTimeout time.Duration
+
+	DBHost     string
+	DBPort     string
+	DBUser     string
+	DBPassword string
+	DBName     string
+	DBSSLMode  string
+
+	MigrationsDir string
+	SourceDir     string
+
+	GeminiAPIKey             string
+	EmbeddingModel           string
+	EmbeddingOutputDimension int
+
+	AnswerModel                string
+	AnswerTemperature          float64
+	AnswerMaxOutputTokens      int
+	AnswerMinTopScore          float64
+	AnswerMaxChunksPerDocument int
+	AnswerScoreWindow          float64
+
+	ChunkMaxChars     int
+	ChunkOverlapChars int
+	BatchSize         int
+
+	DryRun bool
+}
+
+func Load() Config {
+	readMs := getEnvInt("READ_TIMEOUT_MS", 5000)
+	writeMs := getEnvInt("WRITE_TIMEOUT_MS", 5000)
+	idleMs := getEnvInt("IDLE_TIMEOUT_MS", 30000)
+	shutdownMs := getEnvInt("SHUTDOWN_TIMEOUT_MS", 7000)
+
+	return Config{
+		AppEnv: getEnv("APP_ENV", "local"),
+
+		Port:            getEnv("PORT", "8084"),
+		ReadTimeout:     time.Duration(readMs) * time.Millisecond,
+		WriteTimeout:    time.Duration(writeMs) * time.Millisecond,
+		IdleTimeout:     time.Duration(idleMs) * time.Millisecond,
+		ShutdownTimeout: time.Duration(shutdownMs) * time.Millisecond,
+
+		DBHost:     getEnv("KNOWLEDGE_DB_HOST", "127.0.0.1"),
+		DBPort:     getEnv("KNOWLEDGE_DB_PORT", "55432"),
+		DBUser:     getEnv("KNOWLEDGE_DB_USER", "finpharm"),
+		DBPassword: getEnv("KNOWLEDGE_DB_PASSWORD", "finpharm"),
+		DBName:     getEnv("KNOWLEDGE_DB_NAME", "postgres"),
+		DBSSLMode:  getEnv("KNOWLEDGE_DB_SSLMODE", "disable"),
+
+		MigrationsDir: getEnv("KNOWLEDGE_MIGRATIONS_DIR", "./services/knowledge/migrations"),
+		SourceDir:     getEnv("KNOWLEDGE_SOURCE_DIR", "./knowledge/sop"),
+
+		GeminiAPIKey:             firstNonEmpty(os.Getenv("GEMINI_API_KEY"), os.Getenv("GOOGLE_API_KEY")),
+		EmbeddingModel:           getEnv("KNOWLEDGE_EMBEDDING_MODEL", "models/gemini-embedding-001"),
+		EmbeddingOutputDimension: getEnvInt("KNOWLEDGE_EMBEDDING_DIMENSION", 768),
+
+		AnswerModel:                getEnv("KNOWLEDGE_ANSWER_MODEL", "models/gemini-2.5-flash"),
+		AnswerTemperature:          getEnvFloat("KNOWLEDGE_ANSWER_TEMPERATURE", 0.2),
+		AnswerMaxOutputTokens:      getEnvInt("KNOWLEDGE_ANSWER_MAX_OUTPUT_TOKENS", 700),
+		AnswerMinTopScore:          getEnvFloat("KNOWLEDGE_ANSWER_MIN_TOP_SCORE", 0.62),
+		AnswerMaxChunksPerDocument: getEnvInt("KNOWLEDGE_ANSWER_MAX_CHUNKS_PER_DOCUMENT", 2),
+		AnswerScoreWindow:          getEnvFloat("KNOWLEDGE_ANSWER_SCORE_WINDOW", 0.05),
+
+		ChunkMaxChars:     getEnvInt("KNOWLEDGE_CHUNK_MAX_CHARS", 900),
+		ChunkOverlapChars: getEnvInt("KNOWLEDGE_CHUNK_OVERLAP_CHARS", 120),
+		BatchSize:         getEnvInt("KNOWLEDGE_BATCH_SIZE", 8),
+
+		DryRun: getEnvBool("KNOWLEDGE_DRY_RUN", false),
+	}
+}
+
+func (c Config) ValidateForMigrate() error {
+	if strings.TrimSpace(c.DBHost) == "" {
+		return errConfig("KNOWLEDGE_DB_HOST is required")
+	}
+	if !isPositiveIntegerString(c.DBPort) {
+		return errConfig("KNOWLEDGE_DB_PORT must be a positive integer")
+	}
+	if strings.TrimSpace(c.DBUser) == "" {
+		return errConfig("KNOWLEDGE_DB_USER is required")
+	}
+	if strings.TrimSpace(c.DBName) == "" {
+		return errConfig("KNOWLEDGE_DB_NAME is required")
+	}
+	if strings.TrimSpace(c.DBSSLMode) == "" {
+		return errConfig("KNOWLEDGE_DB_SSLMODE is required")
+	}
+	if strings.TrimSpace(c.MigrationsDir) == "" {
+		return errConfig("KNOWLEDGE_MIGRATIONS_DIR is required")
+	}
+	return nil
+}
+
+func (c Config) ValidateForIngest() error {
+	if err := c.ValidateForMigrate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.SourceDir) == "" {
+		return errConfig("KNOWLEDGE_SOURCE_DIR is required")
+	}
+	if c.ChunkMaxChars <= 0 {
+		return errConfig("KNOWLEDGE_CHUNK_MAX_CHARS must be > 0")
+	}
+	if c.ChunkOverlapChars < 0 {
+		return errConfig("KNOWLEDGE_CHUNK_OVERLAP_CHARS must be >= 0")
+	}
+	if c.ChunkOverlapChars >= c.ChunkMaxChars {
+		return errConfig("KNOWLEDGE_CHUNK_OVERLAP_CHARS must be smaller than KNOWLEDGE_CHUNK_MAX_CHARS")
+	}
+	if c.BatchSize <= 0 {
+		return errConfig("KNOWLEDGE_BATCH_SIZE must be > 0")
+	}
+	if c.EmbeddingOutputDimension <= 0 {
+		return errConfig("KNOWLEDGE_EMBEDDING_DIMENSION must be > 0")
+	}
+	if strings.TrimSpace(c.EmbeddingModel) == "" {
+		return errConfig("KNOWLEDGE_EMBEDDING_MODEL is required")
+	}
+	if !c.DryRun && strings.TrimSpace(c.GeminiAPIKey) == "" {
+		return errConfig("GEMINI_API_KEY or GOOGLE_API_KEY is required when KNOWLEDGE_DRY_RUN=false")
+	}
+	return nil
+}
+
+func (c Config) ValidateForQuery() error {
+	if err := c.ValidateForMigrate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.GeminiAPIKey) == "" {
+		return errConfig("GEMINI_API_KEY or GOOGLE_API_KEY is required for retrieval query")
+	}
+	if strings.TrimSpace(c.EmbeddingModel) == "" {
+		return errConfig("KNOWLEDGE_EMBEDDING_MODEL is required")
+	}
+	if c.EmbeddingOutputDimension <= 0 {
+		return errConfig("KNOWLEDGE_EMBEDDING_DIMENSION must be > 0")
+	}
+	return nil
+}
+
+func (c Config) ValidateForAnswer() error {
+	if err := c.ValidateForQuery(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.AnswerModel) == "" {
+		return errConfig("KNOWLEDGE_ANSWER_MODEL is required")
+	}
+	if c.AnswerMaxOutputTokens <= 0 {
+		return errConfig("KNOWLEDGE_ANSWER_MAX_OUTPUT_TOKENS must be > 0")
+	}
+	if c.AnswerTemperature < 0 || c.AnswerTemperature > 2 {
+		return errConfig("KNOWLEDGE_ANSWER_TEMPERATURE must be between 0 and 2")
+	}
+	if c.AnswerMinTopScore < 0 || c.AnswerMinTopScore > 1 {
+		return errConfig("KNOWLEDGE_ANSWER_MIN_TOP_SCORE must be between 0 and 1")
+	}
+	if c.AnswerMaxChunksPerDocument <= 0 {
+		return errConfig("KNOWLEDGE_ANSWER_MAX_CHUNKS_PER_DOCUMENT must be > 0")
+	}
+	if c.AnswerScoreWindow < 0 || c.AnswerScoreWindow > 1 {
+		return errConfig("KNOWLEDGE_ANSWER_SCORE_WINDOW must be between 0 and 1")
+	}
+	return nil
+}
+
+func (c Config) ValidateForAPI() error {
+	if err := c.ValidateForAnswer(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.Port) == "" {
+		return errConfig("PORT is required")
+	}
+	if !isPositiveIntegerString(c.Port) {
+		return errConfig("PORT must be a positive integer")
+	}
+	if c.ReadTimeout <= 0 {
+		return errConfig("READ_TIMEOUT_MS must be > 0")
+	}
+	if c.WriteTimeout <= 0 {
+		return errConfig("WRITE_TIMEOUT_MS must be > 0")
+	}
+	if c.IdleTimeout <= 0 {
+		return errConfig("IDLE_TIMEOUT_MS must be > 0")
+	}
+	if c.ShutdownTimeout <= 0 {
+		return errConfig("SHUTDOWN_TIMEOUT_MS must be > 0")
+	}
+	return nil
+}
+
+func (c Config) DSN() string {
+	return fmt.Sprintf(
+		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		c.DBHost,
+		c.DBPort,
+		c.DBUser,
+		c.DBPassword,
+		c.DBName,
+		c.DBSSLMode,
+	)
+}
+
+func errConfig(msg string) error {
+	return fmt.Errorf("config validation error: %s", msg)
+}
+
+func isPositiveIntegerString(v string) bool {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	return err == nil && n > 0
+}
+
+func getEnv(key, def string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+func getEnvInt(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	i, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return i
+}
+
+func getEnvFloat(key string, def float64) float64 {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return def
+	}
+	return f
+}
+
+func getEnvBool(key string, def bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return def
+	}
+	switch v {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return def
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}

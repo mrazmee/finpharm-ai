@@ -8,24 +8,24 @@ Dokumen operasional singkat untuk menjalankan, mereset, menguji, dan mendemokan 
 ## Lokasi File Penting
 - `Makefile` → root project
 - `RUNBOOK.md` → root project
+- `README.md` → ringkasan project final
 - PowerShell scripts → `scripts/*.ps1`
 - Shell scripts → `scripts/*.sh`
+- Day-by-day docs → `docs/dayXX.md`
 
 ---
 
 ## Catatan Developer Experience (DX)
-Project ini saat ini tetap menjadikan **PowerShell (`.ps1`) sebagai jalur utama**, karena environment utama pengembangan adalah Windows.
+Project ini tetap menjadikan **PowerShell (`.ps1`) sebagai jalur utama**, karena environment utama pengembangan adalah Windows.
 
-Namun untuk memperbaiki developer experience dan membuat repo lebih reviewer-friendly, script operasional penting juga disediakan dalam versi `.sh`.
+Untuk reviewer / parity command:
+- script `.sh` juga tersedia
+- `Makefile` juga tersedia sebagai wrapper
 
 Jadi:
-- `.ps1` **tetap dipertahankan**
-- `.sh` **ditambahkan sebagai parity script**
-- `Makefile` **ditambahkan sebagai wrapper command**
-
-**Catatan:**
-- Pada Windows, jalur yang paling direkomendasikan tetap memakai `scripts/*.ps1`
-- Script `.sh` terutama berguna untuk Linux / macOS / WSL / reviewer yang ingin melihat parity command
+- `.ps1` = jalur utama Windows
+- `.sh` = parity untuk Linux / macOS / WSL
+- `Makefile` = wrapper command
 
 ---
 
@@ -34,10 +34,13 @@ Jadi:
 - Transaction Service: `http://localhost:8081`
 - Inventory Service: `http://localhost:8082`
 - AI Auditor Service: `http://localhost:8083`
+- Knowledge Service: `http://localhost:8084`
 - Worker Metrics: `http://localhost:9094/metrics`
 - Prometheus: `http://localhost:9090`
+- Alertmanager: `http://localhost:9093`
 - Grafana: `http://localhost:3000`
 - RabbitMQ UI: `http://localhost:15672`
+- Alert Webhook: `http://localhost:18080`
 
 ---
 
@@ -73,29 +76,46 @@ docker compose up -d postgres
 .\scripts\rabbitmq-up.ps1
 ```
 
-### 3. Jalankan migration
+### 3. Jalankan migrations domain utama
 ```powershell
 .\scripts\migrate-inventory-up.ps1
 .\scripts\migrate-transaction-up.ps1
 ```
 
-### 4. Jalankan service
+### 4. Jalankan knowledge migration
+```powershell
+.\scripts\run-knowledge-migrate.ps1
+```
+
+### 5. Jalankan knowledge ingestion
+```powershell
+.\scripts\run-knowledge-ingest.ps1
+```
+
+### 6. Jalankan services
 Buka terminal terpisah:
 ```powershell
 .\scripts\run-inventory.ps1
 .\scripts\run-transaction.ps1
 .\scripts\run-ai-auditor.ps1
+.\scripts\run-knowledge-api.ps1
 .\scripts\run-gateway.ps1
 .\scripts\run-worker.ps1
 ```
 
-### 5. Jalankan observability
+### 7. Jalankan observability
 ```powershell
 .\scripts\run-prometheus.ps1
 .\scripts\run-grafana.ps1
 ```
 
-### 6. Jalankan demo readiness
+### 8. Jalankan alerting local
+```powershell
+.\scripts\run-alertmanager.ps1
+.\scripts\run-alert-webhook.ps1
+```
+
+### 9. Jalankan demo readiness
 ```powershell
 .\scripts\demo-readiness.ps1
 ```
@@ -109,6 +129,7 @@ Buka terminal terpisah:
 .\scripts\run-inventory.ps1
 .\scripts\run-transaction.ps1
 .\scripts\run-ai-auditor.ps1
+.\scripts\run-knowledge-api.ps1
 .\scripts\run-gateway.ps1
 .\scripts\run-worker.ps1
 ```
@@ -118,8 +139,38 @@ Buka terminal terpisah:
 ./scripts/run-inventory.sh
 ./scripts/run-transaction.sh
 ./scripts/run-ai-auditor.sh
+./scripts/run-knowledge-api.sh
 ./scripts/run-gateway.sh
 ./scripts/run-worker.sh
+```
+
+---
+
+## Menjalankan Knowledge Flow
+
+**Migration**
+```powershell
+.\scripts\run-knowledge-migrate.ps1
+```
+
+**Ingestion**
+```powershell
+.\scripts\run-knowledge-ingest.ps1
+```
+
+**Manual retrieval**
+```powershell
+.\scripts\run-knowledge-query.ps1 -Query "apakah amoxicillin bisa dijual tanpa resep?"
+```
+
+**Manual answer**
+```powershell
+.\scripts\run-knowledge-answer.ps1 -Query "apa edukasi minimal untuk paracetamol otc?"
+```
+
+**HTTP knowledge API**
+```powershell
+.\scripts\run-knowledge-api.ps1
 ```
 
 ---
@@ -146,28 +197,43 @@ Buka terminal terpisah:
 ./scripts/run-grafana.sh
 ```
 
+### Alertmanager
+**PowerShell:**
+```powershell
+.\scripts\run-alertmanager.ps1
+```
+**Shell:**
+```bash
+./scripts/run-alertmanager.sh
+```
+
+### Alert Webhook
+**PowerShell:**
+```powershell
+.\scripts\run-alert-webhook.ps1
+```
+**Shell:**
+```bash
+./scripts/run-alert-webhook.sh
+```
+
 ---
 
 ## Menghentikan Observability
 
-### Prometheus
-**PowerShell:**
+**Prometheus**
 ```powershell
 .\scripts\stop-prometheus.ps1
 ```
-**Shell:**
-```bash
-./scripts/stop-prometheus.sh
-```
 
-### Grafana
-**PowerShell:**
+**Grafana**
 ```powershell
 .\scripts\stop-grafana.ps1
 ```
-**Shell:**
-```bash
-./scripts/stop-grafana.sh
+
+**Alertmanager**
+```powershell
+.\scripts\stop-alertmanager.ps1
 ```
 
 ---
@@ -194,19 +260,19 @@ Buka terminal terpisah:
 
 Gunakan saat ingin membersihkan data transaksi tanpa mengubah stock medicines.
 
-### PowerShell
+**PowerShell:**
 ```powershell
 .\scripts\reset-transaction-data.ps1
 ```
 
-### Shell
+**Shell:**
 ```bash
 ./scripts/reset-transaction-data.sh
 ```
 
 **Catatan Penting:**
 - script ini hanya membersihkan data transaksi
-- yang dibersihkan biasanya: `transactions` dan `transaction_items`
+- yang dibersihkan: `transactions` dan `transaction_items`
 - script ini **tidak mereset stock inventory**
 - stock tetap dikelola oleh Inventory Service
 
@@ -247,17 +313,13 @@ Gunakan script ini untuk:
 Checklist ini membantu memastikan:
 - semua service sudah hidup
 - observability stack sudah hidup
+- knowledge flow sudah siap
 - token demo sudah siap
 - dashboard siap dipresentasikan
 
 ---
 
 ## Migration Helper
-
-**Catatan:**
-- script `.sh` migration memakai CLI `migrate`
-- DSN database diambil dari environment variable
-- ini sengaja aman supaya tidak mengasumsikan DSN lokal yang salah
 
 ### Inventory
 **PowerShell:**
@@ -285,6 +347,16 @@ export TRANSACTION_DB_DSN="postgres://user:pass@localhost:5432/transaction_db?ss
 ./scripts/migrate-transaction-down.sh
 ```
 
+### Knowledge
+**PowerShell:**
+```powershell
+.\scripts\run-knowledge-migrate.ps1
+```
+**Shell:**
+```bash
+./scripts/run-knowledge-migrate.sh
+```
+
 ---
 
 ## Makefile
@@ -296,6 +368,8 @@ make help
 make run-rabbitmq
 make run-prometheus
 make run-grafana
+make run-alertmanager
+make run-alert-webhook
 make demo-readiness
 make demo-traffic
 make test
@@ -307,35 +381,21 @@ make test
 
 ---
 
-## Catatan Makefile di Windows
-
-Makefile di repo ini ditambahkan untuk merapikan command dan memberi entry point yang lebih enak untuk reviewer.
-Namun perlu dicatat:
-- environment utama project tetap Windows + PowerShell
-- target Makefile saat ini memanggil command PowerShell
-- output `make help` bisa sedikit berbeda tergantung implementasi `make` yang terpasang di Windows
-
-**Contoh:**
-- beberapa implementasi `make` bisa menampilkan output `echo` dengan tanda kutip
-- itu **bukan bug pada repo**, hanya perbedaan perilaku tool `make`
-
-Jadi:
-- Makefile tetap berguna sebagai wrapper command
-- tetapi jalur utama yang paling stabil di Windows tetap `scripts/*.ps1`
-
----
-
 ## Demo Flow Final yang Direkomendasikan
 
 ### 1. Persiapan
 - jalankan PostgreSQL
 - jalankan RabbitMQ
-- jalankan migrations
+- jalankan migrations:
+  - inventory
+  - transaction
+  - knowledge
+- jalankan knowledge ingestion
 - jalankan semua service
-- jalankan Prometheus dan Grafana
+- jalankan Prometheus, Grafana, Alertmanager, dan alert webhook
 - jalankan `.\scripts\demo-readiness.ps1`
 
-### 2. Flow Inti
+### 2. Flow Inti Backend
 - issue token staff
 - issue token supervisor
 - cek medicines
@@ -345,9 +405,20 @@ Jadi:
 - replay request dengan idempotency key yang sama
 - list transactions
 
-### 3. Flow Observability
+### 3. Flow Chatbot SOP
+- jalankan query chatbot SOP via gateway
+- tunjukkan positive grounded answer
+- tunjukkan fallback out-of-domain answer
+- tunjukkan bahwa response berisi:
+  - `answer`
+  - `fallback`
+  - `citations`
+  - `sources`
+  - `confidence`
+
+### 4. Flow Observability
 - buka Prometheus targets
-- buka dashboard Grafana
+- buka Grafana dashboard
 - jalankan `.\scripts\generate-traffic.ps1`
 - tunjukkan:
   - HTTP traffic
@@ -355,15 +426,13 @@ Jadi:
   - transaction outcomes
   - audit decisions
   - worker metrics
-  - fallback total
-  - 4xx/5xx panel bila perlu
+  - AI auditor fallback total
+  - panel 4xx/5xx bila perlu
 
-### 4. Flow Error Demo (Opsional)
-Gunakan untuk memunculkan panel error:
-- unauthorized request → 401
-- invalid limit → 400
-- missing idempotency key → 400
-- rate limit → 429
+### 5. Flow Alerting (Opsional)
+- buka Alertmanager
+- jalankan local alert webhook
+- tunjukkan alert yang sudah diverifikasi di Day 46 bila ingin demo reliability lebih dalam
 
 ---
 
@@ -406,19 +475,12 @@ curl -i -X POST http://localhost:8080/v1/transactions ^
   -d "{\"items\":[{\"medicine_id\":\"PARA500\",\"qty\":1}]}"
 ```
 
-**Replay Request Sama**
+**SOP Chatbot via Gateway**
 ```cmd
-curl -i -X POST http://localhost:8080/v1/transactions ^
+curl -i -X POST http://localhost:8080/v1/chat/sop ^
   -H "Authorization: Bearer <STAFF_TOKEN>" ^
   -H "Content-Type: application/json" ^
-  -H "Idempotency-Key: idem-demo-001" ^
-  -d "{\"items\":[{\"medicine_id\":\"PARA500\",\"qty\":1}]}"
-```
-
-**List Transactions**
-```cmd
-curl -i "http://localhost:8080/v1/transactions?limit=5&offset=0" ^
-  -H "Authorization: Bearer <SUPERVISOR_TOKEN>"
+  -d "{\"question\":\"apakah amoxicillin bisa dijual tanpa resep?\",\"top_k\":5,\"min_score\":0.45}"
 ```
 
 ---
@@ -434,47 +496,57 @@ curl -i "http://localhost:8080/v1/transactions?limit=5&offset=0" ^
 - login default local: `admin` / `admin`
 - buka dashboard: **Finpharm Overview**
 
----
-
-## Catatan Demo Penting
-
-- gunakan idempotency key yang berbeda untuk transaksi baru
-- replay dengan idempotency key yang sama tidak membuat event baru
-- worker metric hanya naik jika benar-benar ada event baru
-- DLQ yang berisi message lama tidak otomatis berarti bug aktif saat ini
-- dashboard Grafana JSON **harus berada di folder**: `observability/grafana/dashboards/`
-- bukan di: `observability/grafana/provisioning/dashboards/`
+### Alertmanager
+- buka `http://localhost:9093`
+- pastikan route alerting hidup
 
 ---
 
 ## Troubleshooting Singkat
 
-**Metrics HTTP Tidak Muncul**
+**Metrics HTTP tidak muncul**
 - generate traffic dulu
-- lalu refresh Prometheus / Grafana
+- refresh Prometheus / Grafana
 
-**Panel 4xx/5xx Kosong**
+**Panel 4xx/5xx kosong**
 - generate error runtime:
-  - unauthorized 401
-  - invalid request 400
-  - rate limit 429
+  - unauthorized `401`
+  - invalid request `400`
+  - rate limit `429`
 - tunggu scrape Prometheus
 - refresh Grafana
 
-**Worker Metrics Kosong**
+**Worker metrics kosong**
 - pastikan worker hidup
 - kirim transaksi baru dengan idempotency key baru
 - cek worker log
 
-**Grafana Folder Muncul Tapi Dashboard Kosong**
-- pastikan JSON dashboard ada di: `observability/grafana/dashboards/`
-- bukan di folder provisioning dashboards
+**Knowledge query / answer gagal**
+- pastikan `GEMINI_API_KEY` sudah tersedia
+- pastikan knowledge migration dan ingestion sudah dijalankan
+- pastikan knowledge API hidup di `:8084`
 
-**Script `.sh` Gagal Dieksekusi**
+**Chatbot gateway gagal**
+- pastikan knowledge API hidup
+- pastikan `KNOWLEDGE_BASE_URL` mengarah ke `http://localhost:8084`
+- pastikan token gateway valid
+
+**Script `.sh` gagal dieksekusi**
 ```bash
 chmod +x ./scripts/*.sh
 ```
 
-**Migration `.sh` Gagal**
+**Migration `.sh` gagal**
 - pastikan CLI `migrate` terpasang
 - pastikan env var DSN sudah di-set
+
+---
+
+## Final Note
+
+Runbook ini cukup untuk:
+- menjalankan project lokal
+- menyiapkan demo
+- menunjukkan flow backend utama
+- menunjukkan chatbot SOP via gateway
+- menunjukkan observability dan alerting

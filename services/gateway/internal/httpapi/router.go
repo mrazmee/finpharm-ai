@@ -21,6 +21,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 	inventoryHandler := handler.NewInventoryProxyHandler(cfg.InventoryBaseURL)
 	stockHandler := handler.NewStockProxyHandler(cfg.TransactionBaseURL)
 	transactionHandler := handler.NewTransactionProxyHandler(cfg.TransactionBaseURL)
+	knowledgeHandler := handler.NewKnowledgeProxyHandler(cfg.KnowledgeBaseURL)
 	authHandler := handler.NewAuthHandler(cfg)
 
 	router := gin.New()
@@ -61,6 +62,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		protected.POST("/stock/check", middleware.RequireRoles("staff", "supervisor"), stockHandler.CheckStock)
 		protected.POST("/transactions", middleware.RequireRoles("staff", "supervisor"), transactionHandler.CreateTransaction)
 		protected.GET("/transactions", middleware.RequireRoles("supervisor"), transactionHandler.ListTransactions)
+		protected.POST("/chat/sop", middleware.RequireRoles("staff", "supervisor"), knowledgeHandler.ChatSOP)
 
 		if cfg.IsDebugEnabled() {
 			protected.GET("/debug/sleep", middleware.RequireRoles("supervisor"), debugSleepHandler())
@@ -71,6 +73,7 @@ func NewRouter(cfg config.Config) *gin.Engine {
 		v1.POST("/stock/check", stockHandler.CheckStock)
 		v1.POST("/transactions", transactionHandler.CreateTransaction)
 		v1.GET("/transactions", transactionHandler.ListTransactions)
+		v1.POST("/chat/sop", knowledgeHandler.ChatSOP)
 
 		if cfg.IsDebugEnabled() {
 			v1.GET("/debug/sleep", debugSleepHandler())
